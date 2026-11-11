@@ -483,7 +483,31 @@
       if(i>0) doc.addPage();
       doc.addImage(img,"JPEG",offx,10,drawW,drawH,undefined,"FAST");
     });
+    // machine-readable copy of the order for the admin cut-list app (admin/)
+    doc.setProperties({ title:"Order - konvektomat.store", subject:"Custom inox tables order", keywords:encodeOrder() });
     return doc.output("blob");
+  }
+
+  /* ---------- order data embedded in the PDF ----------
+     Format "MPR1:<base64 of UTF-8 JSON>", stored in the PDF's Keywords field.
+     Read by admin/index.html — keep the two in step when changing fields. */
+  function orderData(){
+    renderAll();
+    return {
+      v:1, created:new Date().toISOString(),
+      name:$("name").value.trim(), phone:$("phone").value.trim(),
+      tables:tables.map(t=>{
+        const v=t.vals;
+        return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
+          splashOn:v.splashOn, splashH:v.splashH, legBack:v.legBack,
+          baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes };
+      })
+    };
+  }
+  function encodeOrder(){
+    const bytes=new TextEncoder().encode(JSON.stringify(orderData()));
+    let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
+    return "MPR1:"+btoa(bin);
   }
   $("pdf").addEventListener("click",async()=>{
     renderAll(); $("ok").textContent="Подготвям PDF...";

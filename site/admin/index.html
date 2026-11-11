@@ -1,0 +1,463 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Разкрой — админ</title>
+<style>
+  :root{
+    --brand:#1E6FF4; --brand-dark:#1552c7; --ink:#15223a; --muted:#64748b; --line:#d5dde7;
+    --card:#ffffff; --soft:#eef5ff; --ok:#15803d; --warn:#b45309; --bad:#b91c1c;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif;
+    background:linear-gradient(180deg,#cfe0f8 0%,#e4edfa 220px,#eef3f9 100%);color:var(--ink);line-height:1.45}
+  header{background:linear-gradient(180deg,#e7f1ff,#fff);border-bottom:3px solid var(--brand);padding:14px 20px}
+  header .t{font-size:18px;font-weight:800;color:var(--brand);letter-spacing:.4px}
+  header .s{font-size:13px;color:var(--muted);margin-top:2px}
+  .wrap{max-width:1000px;margin:0 auto;padding:16px}
+  .card{background:var(--card);border:1px solid #cfdcf0;border-top:3px solid var(--brand);border-radius:14px;padding:16px;
+    box-shadow:0 2px 10px rgba(30,111,244,.08);margin-bottom:16px}
+  .card h2{margin:0 0 12px;font-size:14px;text-transform:uppercase;letter-spacing:.5px;color:var(--brand);
+    display:flex;align-items:center;gap:8px;padding-bottom:9px;border-bottom:2px solid #e1ebfb}
+  .card h2::before{content:"";width:10px;height:10px;border-radius:3px;background:var(--brand);flex:0 0 auto}
+  .card h3{margin:16px 0 8px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.4px}
+  .muted{color:var(--muted);font-size:13px}
+  .drop{border:2px dashed var(--brand);border-radius:12px;background:var(--soft);padding:22px;text-align:center;cursor:pointer}
+  .drop.over{background:#dbe9ff}
+  .drop b{color:var(--brand-dark)}
+  .row{display:flex;gap:10px;flex-wrap:wrap;margin-top:12px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 14px;border-radius:10px;font-size:14px;font-weight:700;
+    border:1px solid var(--brand);background:#fff;color:var(--brand);cursor:pointer}
+  .btn.primary{background:var(--brand);color:#fff}
+  .btn.danger{border-color:#fecaca;background:#fee2e2;color:var(--bad);padding:6px 10px;font-size:12px}
+  .btn:active{transform:translateY(1px)}
+  .status{margin-top:12px;font-size:14px;font-weight:600}
+  .status.ok{color:var(--ok)} .status.warn{color:var(--warn)} .status.bad{color:var(--bad)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--ink)}
+  label .u{font-weight:400;color:var(--muted)}
+  input[type=number],input[type=text],textarea{width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--line);
+    border-radius:8px;font-size:15px;background:#fff;color:var(--ink);font-family:inherit}
+  input:focus,textarea:focus{outline:none;border-color:var(--brand)}
+  .chk{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-top:22px}
+  .chk input{width:18px;height:18px;accent-color:var(--brand)}
+  .tablehead{display:flex;align-items:center;gap:10px}
+  .tablehead .name{margin-right:auto}
+  .note{margin-top:10px;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;font-size:13px}
+  .warnbox{margin-top:10px;background:#fef2f2;border:1px solid #fecaca;color:var(--bad);border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
+  .tw{overflow-x:auto;margin-top:12px}
+  table.cut{width:100%;border-collapse:collapse;font-size:13px;min-width:640px}
+  table.cut th{text-align:left;background:#0f2744;color:#e2e8f0;padding:7px 8px;font-weight:600;white-space:nowrap}
+  table.cut td{padding:7px 8px;border-bottom:1px solid #e5ebf3;vertical-align:top}
+  table.cut td.size{font-family:ui-monospace,Menlo,Consolas,monospace;font-weight:700;white-space:nowrap;color:var(--brand-dark)}
+  table.cut td.q{text-align:center;font-weight:700}
+  table.cut tr.sheet td:first-child{border-left:4px solid #60a5fa}
+  table.cut tr.tube td:first-child{border-left:4px solid #a78bfa}
+  table.cut tr.hw td:first-child{border-left:4px solid #cbd5e1}
+  .totals{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+  .tot{background:var(--soft);border:1px solid #c7d8f2;border-radius:10px;padding:10px 12px}
+  .tot .k{font-size:12px;color:var(--muted);font-weight:600}
+  .tot .v{font-size:22px;font-weight:800;color:var(--ink)}
+  .tot .d{font-size:12px;color:var(--muted)}
+  .sheets{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+  .sheet svg{width:100%;height:auto;display:block;background:#f8fafc;border:1px solid var(--line);border-radius:6px}
+  .sheet .cap{font-size:12px;color:var(--muted);margin-top:4px}
+  .bar{margin-top:10px}
+  .bar .lbl{font-size:12px;color:var(--muted);margin-bottom:3px}
+  .bar .track{display:flex;height:26px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:repeating-linear-gradient(45deg,#f1f5f9,#f1f5f9 6px,#e2e8f0 6px,#e2e8f0 12px)}
+  .bar .seg{background:#ede9fe;border-right:2px solid #fff;font-size:11px;font-weight:700;color:#4c1d95;display:flex;align-items:center;justify-content:center;overflow:hidden;white-space:nowrap}
+  details.settings summary{cursor:pointer;font-weight:700;color:var(--brand-dark)}
+  details.settings .grid{margin-top:12px}
+  .hint{font-size:11px;color:var(--muted);font-weight:400}
+  .empty{text-align:center;color:var(--muted);padding:20px}
+  @media print{
+    body{background:#fff}
+    .noprint,.drop,details.settings,.btn{display:none!important}
+    .card{box-shadow:none;border-color:#ccc;break-inside:avoid-page}
+    .pagebreak{break-before:page}
+    input,textarea{border:none;padding:0;font-weight:700}
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="t">KONVEKTOMAT.STORE · Разкрой</div>
+  <div class="s">Качи PDF-а на поръчката → материали, детайли и размери за рязане</div>
+</header>
+
+<div class="wrap">
+  <div class="card noprint">
+    <h2>Поръчка</h2>
+    <div class="drop" id="drop" tabindex="0" role="button">
+      <b>📄 Пусни PDF-а тук</b> или натисни, за да го избереш
+      <div class="muted" style="margin-top:4px">PDF-ът, който клиентът изпраща от формата. Файлът се чете само на това устройство — никъде не се качва.</div>
+    </div>
+    <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+    <div class="row">
+      <button class="btn" id="manual" type="button">✏️ Въведи поръчка ръчно</button>
+      <button class="btn primary" id="print" type="button" disabled>🖨 Печат на разкроя</button>
+    </div>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div id="order"></div>
+  <div id="results"></div>
+
+  <div class="card noprint">
+    <details class="settings" id="settingsBox">
+      <summary>⚙️ Настройки на изработката (важат за всички поръчки на това устройство)</summary>
+      <div class="grid" id="settings"></div>
+      <div class="row"><button class="btn" id="resetSettings" type="button">Възстанови стойностите по подразбиране</button></div>
+    </details>
+  </div>
+</div>
+
+<script>
+  const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  const fmt = n => String(Math.round(n*10)/10);
+
+  /* ---------- workshop settings ---------- */
+  const DEFAULTS = { edgeDown:40, shelfFold:30, legInset:30, feet:0, bendDed:0, tubeWall:1.5, tubeStock:6000, kerf:3, sheetW:2000, sheetH:1000 };
+  const SETTINGS = [
+    ["edgeDown","Кант на работния плот","мм, огънат надолу отпред и отстрани"],
+    ["shelfFold","Кант на рафтовете","мм, огънат надолу от 4-те страни"],
+    ["legInset","Отстъп на краката","мм от страничния и предния ръб на плота"],
+    ["feet","Регулируеми крачета","мм височина; 0 = без"],
+    ["bendDed","Корекция за огъване","мм на всяко огъване (изважда се от заготовката)"],
+    ["tubeWall","Стена на тръбата","мм, за теглото"],
+    ["tubeStock","Дължина на прът тръба","мм"],
+    ["kerf","Загуба при рязане","мм на рез"],
+    ["sheetW","Лист — дължина","мм"],
+    ["sheetH","Лист — ширина","мм"],
+  ];
+  const KEY = "mpr-admin-settings-v1";
+  let S = loadSettings();
+  function loadSettings(){
+    try{ return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(KEY) || "{}")); }
+    catch(e){ return Object.assign({}, DEFAULTS); }
+  }
+  function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+  function buildSettings(){
+    $("settings").innerHTML = SETTINGS.map(([k,l,h]) =>
+      '<label>'+esc(l)+'<input type="number" step="any" min="0" data-k="'+k+'" value="'+esc(S[k])+'"><span class="hint">'+esc(h)+'</span></label>').join("");
+    $("settings").querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
+      const v = parseFloat(inp.value);
+      if(!isNaN(v) && v >= 0){ S[inp.dataset.k] = v; saveSettings(); recompute(); }
+    }));
+  }
+  $("resetSettings").addEventListener("click", () => { S = Object.assign({}, DEFAULTS); saveSettings(); buildSettings(); recompute(); });
+
+  /* ---------- order data ---------- */
+  const TABLE_DEFAULT = { qty:1, L:1200, D:600, H:850, thickness:1.5, legProfile:30, splashOn:true, splashH:100,
+                          legBack:70, baseOn:true, baseH:150, midOn:false, notes:"" };
+  function normTable(t){
+    const n = Object.assign({}, TABLE_DEFAULT);
+    for(const k in TABLE_DEFAULT){
+      if(!t || t[k] === undefined || t[k] === null) continue;
+      const d = TABLE_DEFAULT[k];
+      n[k] = typeof d === "number" ? (+t[k] || 0) : typeof d === "boolean" ? !!t[k] : String(t[k]);
+    }
+    n.qty = Math.max(1, Math.round(n.qty || 1));
+    return n;
+  }
+  // same formula as the customer form: halfway between the base and the underside of the top
+  const mid2H = t => Math.round((t.baseH + Math.max(0, t.H - 40)) / 2);
+
+  // the customer form stores "MPR1:<base64 JSON>" in the PDF's Keywords field
+  function decodeOrderFromPdf(buf){
+    const raw = new TextDecoder("latin1").decode(new Uint8Array(buf));
+    if(!raw.startsWith("%PDF")) throw new Error("not_pdf");
+    const m = raw.match(/MPR1:([A-Za-z0-9+\/=]+)/);
+    if(!m) return null;
+    const bin = atob(m[1]);
+    const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))));
+    if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_data");
+    return data;
+  }
+
+  let order = null;
+
+  function setStatus(msg, kind){ $("status").className = "status " + (kind || ""); $("status").textContent = msg; }
+
+  async function loadFile(file){
+    if(!file) return;
+    try{
+      const data = decodeOrderFromPdf(await file.arrayBuffer());
+      if(data){
+        order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:file.name,
+                  tables:data.tables.map(normTable) };
+        setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
+      }else{
+        order = { name:"", phone:"", created:"", source:file.name, tables:[normTable({})] };
+        setStatus("⚠ В „" + file.name + "“ няма данни за поръчката — вероятно е създаден преди обновлението на формата. Въведете размерите от PDF-а ръчно по-долу.", "warn");
+      }
+      renderOrder();
+    }catch(e){
+      setStatus(e && e.message === "not_pdf" ? "✕ „" + file.name + "“ не е PDF файл." : "✕ PDF-ът не може да бъде прочетен.", "bad");
+    }
+  }
+
+  const drop = $("drop");
+  drop.addEventListener("click", () => $("file").click());
+  drop.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); $("file").click(); } });
+  $("file").addEventListener("change", () => { loadFile($("file").files[0]); $("file").value = ""; });
+  ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
+  ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
+  drop.addEventListener("drop", e => loadFile(e.dataTransfer.files[0]));
+  $("manual").addEventListener("click", () => {
+    order = { name:"", phone:"", created:"", source:"", tables:[normTable({})] };
+    setStatus("Ръчна поръчка — въведете размерите.", "");
+    renderOrder();
+  });
+  $("print").addEventListener("click", () => window.print());
+
+  /* ---------- order editor ---------- */
+  const FIELDS = [
+    ["qty","Брой еднакви маси","бр."], ["L","Дължина","мм"], ["D","Дълбочина","мм"], ["H","Височина","мм"],
+    ["legBack","Задни крака от ръба","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
+  ];
+  function renderOrder(){
+    $("print").disabled = !order;
+    if(!order){ $("order").innerHTML = ""; $("results").innerHTML = ""; return; }
+    const created = order.created ? new Date(order.created) : null;
+    let h = '<div class="card"><h2>Клиент</h2><div class="grid">'+
+      '<label>Име<input type="text" id="o-name" value="'+esc(order.name)+'"></label>'+
+      '<label>Телефон<input type="text" id="o-phone" value="'+esc(order.phone)+'"></label></div>'+
+      '<div class="muted" style="margin-top:8px">'+
+        (order.source ? 'Файл: '+esc(order.source) : 'Ръчно въведена поръчка')+
+        (created && !isNaN(created) ? ' · Създадена: '+esc(created.toLocaleString("bg-BG")) : '')+
+      '</div></div>';
+    order.tables.forEach((t, i) => {
+      h += '<div class="card tbl" data-i="'+i+'">'+
+        '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
+        (order.tables.length > 1 ? '<button class="btn danger noprint" data-act="del" type="button">✕ Премахни</button>' : '')+
+        '</h2><div class="grid">'+
+        FIELDS.map(([k,l,u]) => '<label>'+esc(l)+' <span class="u">('+u+')</span><input type="number" min="0" step="1" data-k="'+k+'" value="'+esc(t[k])+'"></label>').join("")+
+        '<label class="chk"><input type="checkbox" data-k="splashOn"'+(t.splashOn?" checked":"")+'> Борд</label>'+
+        '<label class="chk"><input type="checkbox" data-k="baseOn"'+(t.baseOn?" checked":"")+'> Долна основа (плот)</label>'+
+        '<label class="chk"><input type="checkbox" data-k="midOn"'+(t.midOn?" checked":"")+'> Втори междинен плот</label>'+
+        '</div>'+
+        '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes">'+esc(t.notes)+'</textarea></label>'+
+        '<div class="cutout"></div></div>';
+    });
+    h += '<div class="row noprint" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
+    $("order").innerHTML = h;
+
+    $("o-name").addEventListener("input", e => order.name = e.target.value);
+    $("o-phone").addEventListener("input", e => order.phone = e.target.value);
+    $("addT").addEventListener("click", () => { order.tables.push(normTable({})); renderOrder(); });
+    document.querySelectorAll(".tbl").forEach(card => {
+      const t = order.tables[+card.dataset.i];
+      card.querySelectorAll("[data-k]").forEach(inp => {
+        inp.addEventListener("input", () => {
+          const k = inp.dataset.k;
+          if(inp.type === "checkbox"){
+            t[k] = inp.checked;
+            // same rule as the customer form: the second shelf needs the base
+            if(k === "midOn" && t.midOn){ t.baseOn = true; card.querySelector('[data-k="baseOn"]').checked = true; }
+            if(k === "baseOn" && !t.baseOn){ t.midOn = false; card.querySelector('[data-k="midOn"]').checked = false; }
+          }else if(inp.tagName === "TEXTAREA"){ t[k] = inp.value; }
+          else{ t[k] = k === "qty" ? Math.max(1, Math.round(+inp.value || 1)) : (+inp.value || 0); }
+          recompute();
+        });
+      });
+      const del = card.querySelector('[data-act="del"]');
+      if(del) del.addEventListener("click", () => { order.tables.splice(+card.dataset.i, 1); renderOrder(); });
+    });
+    recompute();
+  }
+
+  /* ---------- construction: one table ----------
+     Top: one sheet, edges folded down front + sides, борд folded up at the back (or down if no борд).
+     Shelves: sheet with edges folded down on 4 sides, between the legs.
+     Frame: 30×30 tube rails between the legs, under the top and under every shelf. */
+  function computeTable(t, idx){
+    const s = t.legProfile || 30, th = t.thickness || 1.5;
+    const E = S.edgeDown, F = S.shelfFold, I = S.legInset, B = S.bendDed;
+    const tag = "М" + (idx + 1);
+    const rows = [], sheets = [], tubes = [], warns = [];
+    const sheetMat = "Лист инокс " + th + " мм", tubeMat = "Тръба " + s + "×" + s;
+
+    const back = t.splashOn ? t.splashH : E;
+    const topW = t.L + 2*E - 2*B, topD = t.D + E + back - 2*B;
+    rows.push({ kind:"sheet", part:"Работен плот" + (t.splashOn ? " с борд" : ""), mat:sheetMat, size:fmt(topW)+" × "+fmt(topD), qty:1,
+      note:"Готов: "+t.L+" × "+t.D+" мм. Огъване: отпред и отстрани "+E+" мм надолу; отзад "+(t.splashOn ? "борд "+t.splashH+" мм нагоре" : E+" мм надолу")+
+           ". Изрези в ъглите: отпред "+E+"×"+E+", отзад "+E+"×"+back+" мм." });
+    sheets.push({ label:tag+" плот", w:topW, h:topD });
+
+    const shL = t.L - 2*I, shD = t.D - I - t.legBack;
+    const shelves = [];
+    if(t.baseOn) shelves.push({ name:"Долна основа (плот)", short:"основа", at:t.baseH });
+    if(t.midOn) shelves.push({ name:"Втори междинен плот", short:"междинен", at:mid2H(t) });
+    if(t.midOn && !t.baseOn) warns.push("Втори междинен плот без долна основа — височината му е сметната спрямо полето за основата.");
+    shelves.forEach(sh => {
+      const w = shL + 2*F - 2*B, d = shD + 2*F - 2*B;
+      rows.push({ kind:"sheet", part:sh.name, mat:sheetMat, size:fmt(w)+" × "+fmt(d), qty:1,
+        note:"Готов: "+fmt(shL)+" × "+fmt(shD)+" мм, кант "+F+" мм надолу от 4-те страни. Изрези в ъглите "+(F+s)+"×"+(F+s)+" мм (крак + кант). Горна повърхност на "+sh.at+" мм от пода." });
+      sheets.push({ label:tag+" "+sh.short, w, h:d });
+    });
+
+    const leg = t.H - th - S.feet;
+    const railL = t.L - 2*I - 2*s, railD = t.D - I - t.legBack - 2*s;
+    const frames = 1 + shelves.length;
+    const where = ["под плота"].concat(shelves.map(sh => "под " + sh.short + " (" + sh.at + " мм)")).join(", ");
+    rows.push({ kind:"tube", part:"Крак", mat:tubeMat, size:fmt(leg), qty:4,
+      note:"Височина "+t.H+" − лист "+th+(S.feet ? " − крачета "+S.feet : "")+" мм." });
+    rows.push({ kind:"tube", part:"Царга надлъжна", mat:tubeMat, size:fmt(railL), qty:2*frames,
+      note:"Между левия и десния крак — по 2 бр. (отпред и отзад): "+where+"." });
+    rows.push({ kind:"tube", part:"Царга напречна", mat:tubeMat, size:fmt(railD), qty:2*frames,
+      note:"Между предния и задния крак — по 2 бр. (ляво и дясно): "+where+"." });
+    rows.push({ kind:"hw", part:S.feet ? "Регулируеми крачета" : "Тапи за краката", mat:"Окомплектовка", size:"—", qty:4,
+      note:S.feet ? "Височина "+S.feet+" мм." : "За тръба "+s+"×"+s+"." });
+    for(let i = 0; i < 4; i++) tubes.push({ label:tag+" крак", len:leg });
+    for(let i = 0; i < 2*frames; i++){ tubes.push({ label:tag+" надл.", len:railL }); tubes.push({ label:tag+" напр.", len:railD }); }
+
+    if(t.L <= 0 || t.D <= 0 || t.H <= 0 || shL <= 0 || shD <= 0 || railL <= 0 || railD <= 0 || leg <= 0)
+      warns.push("Размерите са твърде малки за тази конструкция — проверете дължина, дълбочина, височина и отстояния.");
+    if(t.midOn && mid2H(t) <= t.baseH) warns.push("Вторият междинен плот не е над основата — проверете височините.");
+    return { rows, sheets, tubes, warns };
+  }
+
+  /* ---------- nesting rectangles on sheets (MaxRects, best short side fit, rotation allowed) ---------- */
+  function packSheets(pieces, W, H, kerf){
+    const sheets = [], over = [];
+    const fits = (w, h) => (w <= W && h <= H) || (h <= W && w <= H);
+    const list = pieces.slice().sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w*b.h - a.w*a.h);
+    const newSheet = () => { const sh = { free:[{ x:0, y:0, w:W+kerf, h:H+kerf }], placed:[] }; sheets.push(sh); return sh; };
+    function best(sh, w, h){
+      let b = null;
+      sh.free.forEach(r => [[w, h, false], [h, w, true]].forEach(([pw, ph, rot]) => {
+        if(pw > r.w || ph > r.h) return;
+        const sc = Math.min(r.w - pw, r.h - ph), sc2 = Math.max(r.w - pw, r.h - ph);
+        if(!b || sc < b.sc || (sc === b.sc && sc2 < b.sc2)) b = { x:r.x, y:r.y, w:pw, h:ph, rot, sc, sc2 };
+      }));
+      return b;
+    }
+    function place(sh, n){
+      const out = [];
+      sh.free.forEach(f => {
+        if(n.x >= f.x + f.w || n.x + n.w <= f.x || n.y >= f.y + f.h || n.y + n.h <= f.y){ out.push(f); return; }
+        if(n.x > f.x) out.push({ x:f.x, y:f.y, w:n.x - f.x, h:f.h });
+        if(n.x + n.w < f.x + f.w) out.push({ x:n.x + n.w, y:f.y, w:f.x + f.w - n.x - n.w, h:f.h });
+        if(n.y > f.y) out.push({ x:f.x, y:f.y, w:f.w, h:n.y - f.y });
+        if(n.y + n.h < f.y + f.h) out.push({ x:f.x, y:n.y + n.h, w:f.w, h:f.y + f.h - n.y - n.h });
+      });
+      sh.free = out.filter((a, i) => !out.some((b, j) => j !== i &&
+        a.x >= b.x && a.y >= b.y && a.x + a.w <= b.x + b.w && a.y + a.h <= b.y + b.h && (j < i || a.w !== b.w || a.h !== b.h || a.x !== b.x || a.y !== b.y)));
+    }
+    list.forEach(p => {
+      if(p.w <= 0 || p.h <= 0) return;
+      if(!fits(p.w, p.h)){ over.push(p); return; }
+      const w = p.w + kerf, h = p.h + kerf;
+      let target = null, pos = null;
+      sheets.forEach(sh => { const b = best(sh, w, h); if(b && (!pos || b.sc < pos.sc)){ pos = b; target = sh; } });
+      if(!pos){ target = newSheet(); pos = best(target, w, h); }
+      place(target, pos);
+      target.placed.push({ label:p.label, x:pos.x, y:pos.y, w:pos.w - kerf, h:pos.h - kerf, rot:pos.rot });
+    });
+    return { sheets, over };
+  }
+
+  /* ---------- cutting tube bars (first fit decreasing) ---------- */
+  function packBars(pieces, stock, kerf){
+    const bars = [], over = [];
+    pieces.slice().sort((a, b) => b.len - a.len).forEach(p => {
+      if(p.len <= 0) return;
+      if(p.len > stock){ over.push(p); return; }
+      let bar = bars.find(b => b.left >= p.len + (b.cuts.length ? kerf : 0));
+      if(!bar){ bar = { cuts:[], left:stock }; bars.push(bar); }
+      bar.left -= p.len + (bar.cuts.length ? kerf : 0);
+      bar.cuts.push(p);
+    });
+    return { bars, over };
+  }
+
+  /* ---------- render results ---------- */
+  function recompute(){
+    if(!order){ $("results").innerHTML = ""; return; }
+    const per = order.tables.map((t, i) => computeTable(t, i));
+    const sheetPieces = [], tubePieces = [];
+    let feet = 0;
+    per.forEach((r, i) => {
+      const q = order.tables[i].qty;
+      feet += 4 * q;
+      for(let k = 0; k < q; k++){
+        r.sheets.forEach(p => sheetPieces.push(Object.assign({}, p, { label: q > 1 ? p.label.replace(/^М(\d+)/, "М$1." + (k + 1)) : p.label })));
+        r.tubes.forEach(p => tubePieces.push(Object.assign({}, p)));
+      }
+    });
+
+    // per-table cut lists, inside each table card
+    document.querySelectorAll(".tbl").forEach(card => {
+      const i = +card.dataset.i, r = per[i], q = order.tables[i].qty;
+      let h = r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("");
+      h += '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
+        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
+          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") +
+        '</tbody></table></div>';
+      card.querySelector(".cutout").innerHTML = h;
+    });
+
+    const W = S.sheetW, H = S.sheetH, th = 1.5, s = 30;
+    const nest = packSheets(sheetPieces, W, H, S.kerf);
+    const bars = packBars(tubePieces, S.tubeStock, S.kerf);
+    const blankArea = sheetPieces.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6;
+    const nestedArea = nest.sheets.reduce((a, sh) => a + sh.placed.reduce((b, p) => b + p.w * p.h, 0), 0) / 1e6;
+    const sheetArea = W * H / 1e6;
+    const tubeM = tubePieces.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000;
+    const kgPerM = (s*s - Math.pow(Math.max(0, s - 2*S.tubeWall), 2)) * 0.00793;
+    const sheetKg = blankArea * th * 7.93, tubeKg = tubeM * kgPerM;
+    const nTables = order.tables.reduce((a, t) => a + t.qty, 0);
+
+    let h = '<div class="card pagebreak"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">' +
+      tot("Листове " + W + "×" + H + " мм, " + th + " мм", nest.sheets.length + " бр.",
+          "заготовки " + blankArea.toFixed(2) + " м²" + (nest.sheets.length ? " · използване " + Math.round(nestedArea / (nest.sheets.length * sheetArea) * 100) + "%" : "")) +
+      tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.",
+          "общо " + tubeM.toFixed(2) + " м нарязана тръба") +
+      tot(S.feet ? "Регулируеми крачета" : "Тапи за краката", feet + " бр.", "по 4 на маса") +
+      tot("Тегло на готовите маси (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг",
+          "лист " + Math.round(sheetKg) + " кг + тръба " + Math.round(tubeKg) + " кг") +
+      '</div>';
+    if(nest.over.length) h += '<div class="warnbox">⚠ Не се събират на лист ' + W + '×' + H + ' мм (нужна е снадка или по-голям лист): ' +
+      nest.over.map(p => esc(p.label) + ' ' + fmt(p.w) + '×' + fmt(p.h)).join(", ") + '</div>';
+    if(bars.over.length) h += '<div class="warnbox">⚠ По-дълги от прът ' + S.tubeStock + ' мм: ' +
+      bars.over.map(p => esc(p.label) + ' ' + fmt(p.len)).join(", ") + '</div>';
+    h += '</div>';
+
+    if(nest.sheets.length){
+      h += '<div class="card"><h2>Разкрой на листовете</h2><div class="muted">Ориентировъчно разположение на заготовките (с ' + S.kerf + ' мм за рязане между тях). ↻ = завъртяна.</div><div class="sheets" style="margin-top:10px">' +
+        nest.sheets.map((sh, i) => sheetSvg(sh, i, W, H)).join("") + '</div></div>';
+    }
+    if(bars.bars.length){
+      h += '<div class="card"><h2>Рязане на тръбите</h2><div class="muted">Пръти по ' + S.tubeStock + ' мм, ' + S.kerf + ' мм загуба на рез.</div>' +
+        bars.bars.map((b, i) => '<div class="bar"><div class="lbl">Прът ' + (i + 1) + ': ' +
+          b.cuts.map(c => fmt(c.len)).join(" + ") + ' · остатък ' + fmt(b.left) + ' мм</div><div class="track">' +
+          b.cuts.map(c => '<div class="seg" style="flex:0 0 ' + (c.len / S.tubeStock * 100) + '%" title="' + esc(c.label + ' ' + fmt(c.len)) + '">' + fmt(c.len) + '</div>').join("") +
+          '</div></div>').join("") + '</div>';
+    }
+    $("results").innerHTML = h;
+  }
+  function tot(k, v, d){ return '<div class="tot"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
+  function sheetSvg(sh, i, W, H){
+    const used = sh.placed.reduce((a, p) => a + p.w * p.h, 0) / (W * H) * 100;
+    const g = sh.placed.map(p => {
+      const fs = Math.max(26, Math.min(70, Math.min(p.w, p.h) / 5));
+      const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+      return '<rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" fill="#dbeafe" stroke="#1E6FF4" stroke-width="4"/>' +
+        '<text x="' + cx + '" y="' + (cy - fs * 0.15) + '" font-size="' + fs + '" font-weight="700" fill="#15223a" text-anchor="middle">' + esc(p.label) + (p.rot ? " ↻" : "") + '</text>' +
+        '<text x="' + cx + '" y="' + (cy + fs * 1.05) + '" font-size="' + (fs * 0.8) + '" fill="#1552c7" text-anchor="middle">' + fmt(p.w) + '×' + fmt(p.h) + '</text>';
+    }).join("");
+    return '<div class="sheet"><svg viewBox="-10 -10 ' + (W + 20) + ' ' + (H + 20) + '" xmlns="http://www.w3.org/2000/svg">' +
+      '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fff" stroke="#64748b" stroke-width="6"/>' + g + '</svg>' +
+      '<div class="cap">Лист ' + (i + 1) + ' · ' + sh.placed.length + ' заготовки · използване ' + Math.round(used) + '%</div></div>';
+  }
+
+  buildSettings();
+  renderOrder();
+</script>
+</body>
+</html>
