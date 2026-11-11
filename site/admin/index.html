@@ -77,6 +77,10 @@
   .scheme svg{width:100%;max-width:760px;height:auto;display:block;background:#fff;border:1px solid var(--line);border-radius:8px}
   .scheme figcaption{font-size:12px;color:var(--muted);margin-top:4px}
   .compare{margin-top:10px;font-size:13px;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px 10px}
+  .commit{margin-top:12px;display:flex;flex-direction:column;gap:6px;align-items:flex-start}
+  .donebox{background:#ecfdf5;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
+  .offtxt{color:#15803d;font-weight:700}
+  table.stock{min-width:560px}
   .printonly{display:none}
   .printsum{font-size:13px;line-height:1.6}
   .printsum b{font-weight:700}
@@ -125,7 +129,7 @@
       <b>📄 Пусни PDF-а тук</b> или натисни, за да го избереш
       <div class="muted" style="margin-top:4px">PDF-ът, който клиентът изпраща от формата. Файлът се чете само на това устройство — никъде не се качва.</div>
     </div>
-    <input type="file" id="file" accept="application/pdf,.pdf" hidden>
+    <input type="file" id="file" accept="application/pdf,.pdf,application/json,.json" hidden>
     <div class="row">
       <button class="btn" id="manual" type="button">✏️ Въведи поръчка ръчно</button>
       <button class="btn primary" id="print" type="button" disabled>🖨 Печат на разкроя</button>
@@ -135,6 +139,25 @@
 
   <div id="order"></div>
   <div id="results"></div>
+
+  <div class="card noprint" id="stockCard">
+    <h2>Фира — склад</h2>
+    <div class="muted">Остатъци от листове с цяла дължина или цяла ширина на листа. При нова поръчка първо се ползва фирата, после нови листове. Списъкът се пази в този браузър — свалете резервно копие, за да го пренесете на друго устройство.</div>
+    <div id="stockList" style="margin-top:10px"></div>
+    <h3>Добави фира ръчно</h3>
+    <div class="grid">
+      <label>Дължина <span class="u">(мм)</span><input type="number" id="addW" min="1" step="1"></label>
+      <label>Ширина <span class="u">(мм)</span><input type="number" id="addH" min="1" step="1"></label>
+      <label>Бележка<input type="text" id="addNote" placeholder="напр. стар остатък от цеха"></label>
+    </div>
+    <div class="row">
+      <button class="btn" id="addOff" type="button">➕ Добави</button>
+      <button class="btn" id="exportOff" type="button">⬇ Свали резервно копие</button>
+      <button class="btn" id="importOff" type="button">⬆ Зареди копие</button>
+      <input type="file" id="importFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="status" id="stockStatus"></div>
+  </div>
 
   <div class="card noprint">
     <details class="settings" id="settingsBox">
@@ -152,7 +175,7 @@
 
   /* ---------- workshop settings ---------- */
   const DEFAULTS = { topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, feet:0, bendDed:0, tubeWall:1.5,
-                     tubeStock:6000, kerf:3, sheetW:2000, sheetH:1000, sheetPrice:0, sheet2W:2500, sheet2H:1250, sheet2Price:0 };
+                     tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:0, sheet2W:2500, sheet2H:1250, sheet2Price:0 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
     ["topReturn","Работен плот — обратно огъване","мм, навътре под плота"],
@@ -164,6 +187,7 @@
     ["tubeWall","Стена на тръбата","мм, за теглото"],
     ["tubeStock","Дължина на прът тръба","мм"],
     ["kerf","Загуба при рязане","мм на рез"],
+    ["offMin","Най-тясна фира","мм — по-тясна ивица не се пази"],
     ["sheetW","Лист 1 — дължина","мм"],
     ["sheetH","Лист 1 — ширина","мм"],
     ["sheetPrice","Лист 1 — цена","€ за брой; 0 = сравнение по площ"],
@@ -223,6 +247,16 @@
   async function loadFile(file){
     if(!file) return;
     try{
+      // an order saved as .json (same shape as the data inside the PDF)
+      if(/\.json$/i.test(file.name)){
+        const data = JSON.parse(await file.text());
+        if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_json");
+        order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:data.source || file.name,
+                  tables:data.tables.map(normTable) };
+        setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
+        renderOrder();
+        return;
+      }
       const data = decodeOrderFromPdf(await file.arrayBuffer());
       if(data){
         order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:file.name,
@@ -234,7 +268,8 @@
       }
       renderOrder();
     }catch(e){
-      setStatus(e && e.message === "not_pdf" ? "✕ „" + file.name + "“ не е PDF файл." : "✕ PDF-ът не може да бъде прочетен.", "bad");
+      setStatus(e && e.message === "not_pdf" ? "✕ „" + file.name + "“ не е PDF файл." :
+                /\.json$/i.test(file.name) ? "✕ „" + file.name + "“ не е файл с поръчка." : "✕ PDF-ът не може да бъде прочетен.", "bad");
     }
   }
 
@@ -313,7 +348,7 @@
      Top: one sheet. Front and sides: front board folded down, then a return folded inward under the plate.
           Back: борд folded up, or the same board + return when there is no борд.
      Shelves (долна основа, втори междинен плот): board down + return inward on all 4 sides, between the legs.
-     Frame: 30×30 tube rails between the legs, under the top and under every shelf. */
+     Legs: 30×30 tube, welded straight to the folded edges of the top and shelves — no frame rails (царги). */
   function computeTable(t, idx){
     const s = t.legProfile || 30, th = t.thickness || 1.5;
     const E = S.topEdge, R = S.topReturn, F = S.shelfEdge, Rs = S.shelfReturn, I = S.legInset, B = S.bendDed;
@@ -350,21 +385,14 @@
       E:F, R:Rs, backUp:false, leg:s, blankW:shW, blankD:shDd });
 
     const leg = t.H - th - S.feet;
-    const railL = t.L - 2*I - 2*s, railD = t.D - I - t.legBack - 2*s;
-    const frames = 1 + shelves.length;
-    const where = ["под плота"].concat(shelves.map(sh => "под " + sh.short + " (" + sh.at + " мм)")).join(", ");
+    const welded = ["работния плот"].concat(shelves.map(sh => sh.short === "основа" ? "долната основа" : "втория междинен плот")).join(", ");
     rows.push({ kind:"tube", part:"Крак", mat:tubeMat, size:fmt(leg), qty:4,
-      note:"Височина "+t.H+" − лист "+th+(S.feet ? " − крачета "+S.feet : "")+" мм." });
-    rows.push({ kind:"tube", part:"Царга надлъжна", mat:tubeMat, size:fmt(railL), qty:2*frames,
-      note:"Между левия и десния крак — по 2 бр. (отпред и отзад): "+where+"." });
-    rows.push({ kind:"tube", part:"Царга напречна", mat:tubeMat, size:fmt(railD), qty:2*frames,
-      note:"Между предния и задния крак — по 2 бр. (ляво и дясно): "+where+"." });
+      note:"Височина "+t.H+" − лист "+th+(S.feet ? " − крачета "+S.feet : "")+" мм. Заварява се директно към кантовете на: "+welded+"." });
     rows.push({ kind:"hw", part:S.feet ? "Регулируеми крачета" : "Тапи за краката", mat:"Окомплектовка", size:"—", qty:4,
       note:S.feet ? "Височина "+S.feet+" мм." : "За тръба "+s+"×"+s+"." });
     for(let i = 0; i < 4; i++) tubes.push({ label:tag+" крак", len:leg });
-    for(let i = 0; i < 2*frames; i++){ tubes.push({ label:tag+" надл.", len:railL }); tubes.push({ label:tag+" напр.", len:railD }); }
 
-    if(t.L <= 0 || t.D <= 0 || t.H <= 0 || shL <= 0 || shD <= 0 || railL <= 0 || railD <= 0 || leg <= 0)
+    if(t.L <= 0 || t.D <= 0 || t.H <= 0 || shL <= 0 || shD <= 0 || leg <= 0)
       warns.push("Размерите са твърде малки за тази конструкция — проверете дължина, дълбочина, височина и отстояния.");
     if(t.midOn && mid2H(t) <= t.baseH) warns.push("Вторият междинен плот не е над основата — проверете височините.");
     return { rows, sheets, tubes, warns, schemes };
@@ -372,8 +400,8 @@
 
   /* ---------- fold diagram: flat blank with bend lines + edge cross-section (schematic, not to scale) ---------- */
   function foldSvg(sc){
-    // schematic widths: wide enough that neighbouring labels (e.g. "10" and "20") never run together
-    const segPx = v => Math.max(28, Math.min(48, v * 0.9));
+    // fold segments in proportion to each other (2 px per mm: 10 → 20, 30 → 60); the plate itself is not to scale
+    const segPx = v => Math.max(18, Math.min(90, v * 2));
     const side = sc.R > 0 ? [sc.R, sc.E] : [sc.E];                 // outer edge → plate
     const backSegs = sc.backUp ? [sc.splashH] : side;
     const sp = side.map(segPx), bp = backSegs.map(segPx);
@@ -453,16 +481,19 @@
     leg.forEach((l, i) => { const lx = 20 + i * 250; g += ln(lx, LY, lx + 34, LY, l[0]) + t(lx + 42, LY + 4, l[1], 'font-size="12" fill="#334155"'); });
     const VW = Math.max(PX + 260, 20 + leg.length * 250), VH = LY + 16;
     return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">' + g + '</svg>' +
-      '<figcaption>' + esc(sc.title) + (sc.qty > 1 ? ' — ' + sc.qty + ' бр. еднакви' : '') + ' · заготовка ' + fmt(sc.blankW) + ' × ' + fmt(sc.blankD) + ' мм · схема, не е в мащаб</figcaption></figure>';
+      '<figcaption>' + esc(sc.title) + (sc.qty > 1 ? ' — ' + sc.qty + ' бр. еднакви' : '') + ' · заготовка ' + fmt(sc.blankW) + ' × ' + fmt(sc.blankD) + ' мм · огъванията са в пропорция, плотът не е в мащаб</figcaption></figure>';
   }
 
   /* ---------- nesting rectangles on sheets (MaxRects, best short side fit, rotation allowed) ---------- */
   function newSheet(type, kerf){ return { type, W:type.W, H:type.H, free:[{ x:0, y:0, w:type.W + kerf, h:type.H + kerf }], placed:[] }; }
-  function bestFit(sh, w, h){
+  // mode "ss": best short side fit (tight packing); "bl": keep parts toward the start of the sheet's length,
+  // which leaves a clean full-width strip at the end that can be kept as an offcut
+  function bestFit(sh, w, h, mode){
     let b = null;
     sh.free.forEach(r => [[w, h, false], [h, w, true]].forEach(([pw, ph, rot]) => {
       if(pw > r.w || ph > r.h) return;
-      const sc = Math.min(r.w - pw, r.h - ph), sc2 = Math.max(r.w - pw, r.h - ph);
+      const sc = mode === "bl" ? r.x + pw : Math.min(r.w - pw, r.h - ph);
+      const sc2 = mode === "bl" ? r.y + ph : Math.max(r.w - pw, r.h - ph);
       if(!b || sc < b.sc || (sc === b.sc && sc2 < b.sc2)) b = { x:r.x, y:r.y, w:pw, h:ph, rot, sc, sc2 };
     }));
     return b;
@@ -492,9 +523,37 @@
       .filter((t, i, a) => a.findIndex(x => x.name === t.name) === i);
   }
 
-  /* Tries every sheet size on its own and a mixed fill, with several piece orders, then moves each
-     sheet's pieces onto a cheaper size where they fit, and keeps the cheapest plan.
-     Cost is the price per sheet when every size has one, otherwise the sheet area. */
+  /* Offcuts kept after cutting: only a strip with the full width or the full length of the sheet (or offcut)
+     it comes from. The full-width strip at the end has priority; a narrower strip than S.offMin is not kept. */
+  function leftovers(sh, kerf, min){
+    if(!sh.placed.length) return [];
+    const maxX = Math.max(...sh.placed.map(p => p.x + p.w)), maxY = Math.max(...sh.placed.map(p => p.y + p.h));
+    const rw = Math.floor(sh.W - maxX - kerf), bh = Math.floor(sh.H - maxY - kerf);
+    if(rw >= min) return [{ x:sh.W - rw, y:0, w:rw, h:sh.H, full:"width" }];
+    if(bh >= min) return [{ x:0, y:sh.H - bh, w:sh.W, h:bh, full:"length" }];
+    return [];
+  }
+  const leftArea = sheets => sheets.reduce((a, sh) => a + leftovers(sh, S.kerf, S.offMin).reduce((b, l) => b + l.w * l.h, 0), 0);
+
+  // parts go onto offcuts from the store first; the smallest offcut that fits is used, so big ones stay for big parts
+  function useOffcuts(pieces, offcuts, kerf){
+    const pool = offcuts.slice().sort((a, b) => a.w * a.h - b.w * b.h)
+      .map(o => newSheet({ W:Math.max(o.w, o.h), H:Math.min(o.w, o.h), price:0, name:o.id, offcut:o }, kerf));
+    const rest = [];
+    pieces.slice().sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w*b.h - a.w*a.h).forEach(p => {
+      const w = p.w + kerf, h = p.h + kerf;
+      let target = null, pos = null;
+      pool.filter(sh => sh.placed.length).forEach(sh => { const b = bestFit(sh, w, h, "bl"); if(b && (!pos || b.sc < pos.sc)){ pos = b; target = sh; } });
+      if(!pos) for(const sh of pool){ if(sh.placed.length) continue; const b = bestFit(sh, w, h, "bl"); if(b){ pos = b; target = sh; break; } }
+      if(pos) addPiece(target, p, pos, kerf); else rest.push(p);
+    });
+    return { used:pool.filter(sh => sh.placed.length), rest };
+  }
+
+  /* New sheets: tries every sheet size on its own and a mixed fill, with several piece orders and both placement
+     modes, then moves each sheet's pieces onto a cheaper size where they fit, and keeps the cheapest plan
+     (ties: fewer sheets, then the larger usable offcut). Cost is the price per sheet when every size has one,
+     otherwise the sheet area. */
   function packMulti(pieces, types, kerf){
     const priced = types.length > 0 && types.every(t => t.price > 0);
     const cost = t => priced ? t.price : t.W * t.H / 1e6;
@@ -508,56 +567,56 @@
       (a, b) => Math.min(b.w, b.h) - Math.min(a.w, a.h) || b.w*b.h - a.w*a.h,
       (a, b) => (b.w + b.h) - (a.w + a.h),
     ];
-    function run(list, choose){
-      const sheets = [];
-      for(let i = 0; i < list.length; i++){
-        const p = list[i], w = p.w + kerf, h = p.h + kerf;
-        let target = null, pos = null;
-        sheets.forEach(sh => { const b = bestFit(sh, w, h); if(b && (!pos || b.sc < pos.sc)){ pos = b; target = sh; } });
-        if(!pos){
-          const t = choose(list.slice(i));
-          if(!t) return null;
-          target = newSheet(t, kerf); sheets.push(target); pos = bestFit(target, w, h);
-          if(!pos) return null;
-        }
-        addPiece(target, p, pos, kerf);
-      }
-      return sheets;
-    }
-    const only = t => rest => fitsT(rest[0], t) ? t : (types.find(x => fitsT(rest[0], x)) || null);
-    // mixed: open the size whose fresh sheet, greedily filled with what is left, costs least per m² of blanks
-    const mixed = rest => {
-      let best = null;
-      types.filter(t => fitsT(rest[0], t)).forEach(t => {
-        const sh = newSheet(t, kerf); let area = 0;
-        rest.forEach(p => { const b = bestFit(sh, p.w + kerf, p.h + kerf); if(b){ placeRect(sh, b); area += p.w * p.h; } });
-        const score = cost(t) / Math.max(area, 1);
-        if(!best || score < best.score) best = { t, score };
-      });
-      return best && best.t;
-    };
-    function downgrade(sheets){
-      sheets.forEach((sh, i) => {
-        types.filter(t => cost(t) < cost(sh.type)).sort((a, b) => cost(a) - cost(b)).some(t => {
-          const ns = newSheet(t, kerf);
-          const ps = sh.placed.slice().sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w*b.h - a.w*a.h);
-          for(const p of ps){ const b = bestFit(ns, p.w + kerf, p.h + kerf); if(!b) return false; addPiece(ns, p, b, kerf); }
-          sheets[i] = ns; return true;
-        });
-      });
-      return sheets;
-    }
     const plans = [];
-    orders.forEach(o => {
-      const list = ok.slice().sort(o);
-      types.forEach(t => { const r = run(list, only(t)); if(r) plans.push({ sheets:r, only:t.name }); });
-      if(types.length > 1){ const r = run(list, mixed); if(r) plans.push({ sheets:r, only:null }); }
+    ["ss", "bl"].forEach(mode => {
+      function run(list, choose){
+        const sheets = [];
+        for(let i = 0; i < list.length; i++){
+          const p = list[i], w = p.w + kerf, h = p.h + kerf;
+          let target = null, pos = null;
+          sheets.forEach(sh => { const b = bestFit(sh, w, h, mode); if(b && (!pos || b.sc < pos.sc)){ pos = b; target = sh; } });
+          if(!pos){
+            const t = choose(list.slice(i));
+            if(!t) return null;
+            target = newSheet(t, kerf); sheets.push(target); pos = bestFit(target, w, h, mode);
+            if(!pos) return null;
+          }
+          addPiece(target, p, pos, kerf);
+        }
+        return sheets;
+      }
+      const only = t => rest => fitsT(rest[0], t) ? t : (types.find(x => fitsT(rest[0], x)) || null);
+      // mixed: open the size whose fresh sheet, greedily filled with what is left, costs least per m² of blanks
+      const mixed = rest => {
+        let best = null;
+        types.filter(t => fitsT(rest[0], t)).forEach(t => {
+          const sh = newSheet(t, kerf); let area = 0;
+          rest.forEach(p => { const b = bestFit(sh, p.w + kerf, p.h + kerf, mode); if(b){ placeRect(sh, b); area += p.w * p.h; } });
+          const score = cost(t) / Math.max(area, 1);
+          if(!best || score < best.score) best = { t, score };
+        });
+        return best && best.t;
+      };
+      function downgrade(sheets){
+        sheets.forEach((sh, i) => {
+          types.filter(t => cost(t) < cost(sh.type)).sort((a, b) => cost(a) - cost(b)).some(t => {
+            const ns = newSheet(t, kerf);
+            const ps = sh.placed.slice().sort((a, b) => Math.max(b.w, b.h) - Math.max(a.w, a.h) || b.w*b.h - a.w*a.h);
+            for(const p of ps){ const b = bestFit(ns, p.w + kerf, p.h + kerf, mode); if(!b) return false; addPiece(ns, p, b, kerf); }
+            sheets[i] = ns; return true;
+          });
+        });
+        return sheets;
+      }
+      orders.forEach(o => {
+        const list = ok.slice().sort(o);
+        types.forEach(t => { const r = run(list, only(t)); if(r) plans.push({ sheets:r, only:t.name }); });
+        if(types.length > 1){ const r = run(list, mixed); if(r) plans.push({ sheets:downgrade(r), only:null }); }
+      });
     });
-    plans.forEach(pl => {
-      if(!pl.only && types.length > 1) downgrade(pl.sheets);
-      pl.cost = pl.sheets.reduce((a, sh) => a + cost(sh.type), 0);
-    });
-    const better = (a, b) => a.cost < b.cost - 1e-9 || (Math.abs(a.cost - b.cost) < 1e-9 && a.sheets.length < b.sheets.length);
+    plans.forEach(pl => { pl.cost = pl.sheets.reduce((a, sh) => a + cost(sh.type), 0); pl.left = leftArea(pl.sheets); });
+    const better = (a, b) => a.cost < b.cost - 1e-9 ||
+      (Math.abs(a.cost - b.cost) < 1e-9 && (a.sheets.length < b.sheets.length || (a.sheets.length === b.sheets.length && a.left > b.left)));
     let best = null;
     plans.forEach(pl => { if(!best || better(pl, best)) best = pl; });
     // the best plan using one size only, for the comparison line
@@ -624,7 +683,24 @@
     });
 
     const th = 1.5, s = 30, types = sheetTypes();
-    const nest = packMulti(sheetPieces, types, S.kerf);
+    // offcuts from the store go first; a confirmed order is shown against the store as it was before confirming
+    const key = orderKey(), done = INV.done[key];
+    const stock = (done ? INV.items.filter(o => !done.added.includes(o.id)).concat(done.used) : INV.items)
+      .filter(o => (+o.th || 1.5) === th);
+    const oc = useOffcuts(sheetPieces, stock, S.kerf);
+    const nest = packMulti(oc.rest, types, S.kerf);
+    // usable leftovers of every sheet and offcut, with the serial numbers they get when the cut is confirmed
+    let next = INV.next, k = 0;
+    const created = [];
+    oc.used.concat(nest.sheets).forEach(sh => {
+      sh.left = leftovers(sh, S.kerf, S.offMin).map(l => {
+        const id = done ? (done.added[k++] || "?") : serial(next++);
+        const src = sh.type.offcut ? "от фира " + sh.type.offcut.id : "от лист " + sh.W + "×" + sh.H;
+        const o = Object.assign({ id, src }, l); created.push(o); return o;
+      });
+    });
+    CURRENT = { key, used:oc.used.map(sh => sh.type.offcut), created };
+
     const bars = packBars(tubePieces, S.tubeStock, S.kerf);
     const blankArea = sheetPieces.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6;
     const tubeM = tubePieces.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000;
@@ -632,23 +708,26 @@
     const sheetKg = blankArea * th * 7.93, tubeKg = tubeM * kgPerM;
     const nTables = order.tables.reduce((a, t) => a + t.qty, 0);
     const money = v => nest.priced ? "€ " + v.toFixed(2) : v.toFixed(2) + " м²";
+    const ids = list => list.length ? list.join(", ") : "—";
 
     let h = '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
+    if(oc.used.length) h += tot("Фира от склада", oc.used.length + " бр.", oc.used.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + ")").join(", "));
     types.forEach(t => {
       const used = nest.sheets.filter(sh => sh.type.name === t.name);
       if(!used.length) return;
       const util = used.reduce((a, sh) => a + sh.placed.reduce((b, p) => b + p.w * p.h, 0), 0) / (used.length * t.W * t.H);
-      h += tot("Листове " + t.name + " мм, " + th + " мм", used.length + " бр.", "използване " + Math.round(util * 100) + "%");
+      h += tot("Нови листове " + t.name + " мм, " + th + " мм", used.length + " бр.", "използване " + Math.round(util * 100) + "%");
     });
-    if(!nest.sheets.length) h += tot("Листове " + th + " мм", "0 бр.", "няма детайли от лист");
-    h += tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.",
-          "общо " + tubeM.toFixed(2) + " м нарязана тръба") +
+    if(!nest.sheets.length) h += tot("Нови листове " + th + " мм", "0 бр.", oc.used.length ? "всичко е от фира" : "няма детайли от лист");
+    h += tot("Нова фира за склада", created.length + " бр.", created.length ? created.map(c => c.id + " (" + lw(c) + ")").join(", ") : "няма годни остатъци") +
+      tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.",
+          "общо " + tubeM.toFixed(2) + " м — само крака") +
       tot(S.feet ? "Регулируеми крачета" : "Тапи за краката", feet + " бр.", "по 4 на маса") +
       tot("Тегло на готовите маси (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг",
           "лист " + Math.round(sheetKg) + " кг + тръба " + Math.round(tubeKg) + " кг") +
       '</div>';
     if(nest.sheets.length && types.length > 1){
-      h += '<div class="compare"><b>Листове — ' + (nest.priced ? 'цена' : 'площ') + ':</b> избрано ' + nest.sheets.length + ' бр., ' + money(nest.cost) +
+      h += '<div class="compare"><b>Нови листове — ' + (nest.priced ? 'цена' : 'площ') + ':</b> избрано ' + nest.sheets.length + ' бр., ' + money(nest.cost) +
         nest.singles.map(x => ' · само ' + x.name + ': ' + x.n + ' бр., ' + money(x.cost)).join("") +
         (nest.priced ? '' : '<br><span class="muted">Въведете цените на листовете в настройките, за да се сравнява по цена вместо по площ.</span>') + '</div>';
     }
@@ -656,11 +735,20 @@
       nest.over.map(p => esc(p.label) + ' ' + fmt(p.w) + '×' + fmt(p.h)).join(", ") + '</div>';
     if(bars.over.length) h += '<div class="warnbox">⚠ По-дълги от прът ' + S.tubeStock + ' мм: ' +
       bars.over.map(p => esc(p.label) + ' ' + fmt(p.len)).join(", ") + '</div>';
+    h += '<div class="commit noprint">' + (done
+      ? '<div class="donebox">✓ Разкроят е потвърден на ' + esc(new Date(done.at).toLocaleString("bg-BG")) + '. Взета от склада: ' +
+          esc(ids(done.used.map(u => u.id))) + ' · добавена: ' + esc(ids(done.added)) + '.</div>' +
+        '<button class="btn" id="undoCut" type="button">↶ Отмени потвърждението</button>'
+      : '<button class="btn primary" id="commitCut" type="button">✓ Потвърди разкроя — поръчката е нарязана</button>' +
+        '<div class="muted">Ще вземе от склада: ' + esc(ids(CURRENT.used.map(o => o.id))) + ' · ще добави: ' + esc(ids(created.map(c => c.id))) +
+        '. Номерата на новата фира са тези от чертежа — напишете ги върху парчетата.</div>') + '</div>';
     h += '</div>';
 
-    if(nest.sheets.length){
-      h += '<div class="card sheetscard"><h2>Разкрой на листовете</h2><div class="muted">Ориентировъчно разположение на заготовките (с ' + S.kerf + ' мм за рязане между тях). ↻ = завъртяна.</div><div class="sheets" style="margin-top:10px">' +
-        nest.sheets.map((sh, i) => sheetSvg(sh, i)).join("") + '</div></div>';
+    if(oc.used.length || nest.sheets.length){
+      h += '<div class="card sheetscard"><h2>Разкрой на листовете</h2><div class="muted">Ориентировъчно разположение на заготовките (с ' + S.kerf +
+        ' мм за рязане между тях). ↻ = завъртяна. Зелено = нова фира за склада.</div><div class="sheets" style="margin-top:10px">' +
+        oc.used.map(sh => sheetSvg(sh, "Фира " + sh.type.offcut.id)).join("") +
+        nest.sheets.map((sh, i) => sheetSvg(sh, "Лист " + (i + 1))).join("") + '</div></div>';
     }
     if(bars.bars.length){
       h += '<div class="card"><h2>Рязане на тръбите</h2><div class="muted">Пръти по ' + S.tubeStock + ' мм, ' + S.kerf + ' мм загуба на рез.</div>' +
@@ -670,25 +758,133 @@
           '</div></div>').join("") + '</div>';
     }
     $("results").innerHTML = h;
+    const cb = $("commitCut"); if(cb) cb.addEventListener("click", commitCut);
+    const ub = $("undoCut"); if(ub) ub.addEventListener("click", undoCut);
   }
   function tot(k, v, d){ return '<div class="tot"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
-  function sheetSvg(sh, i){
+  function sheetSvg(sh, title){
     const W = sh.W, H = sh.H;
     const used = sh.placed.reduce((a, p) => a + p.w * p.h, 0) / (W * H) * 100;
-    const g = sh.placed.map(p => {
-      const name = p.label + (p.rot ? " ↻" : "");
+    const box = (x, y, w, h, name, sub, fill, stroke, dash, color) => {
+      const turn = h > w * 1.6, bw = turn ? h : w, bh = turn ? w : h;
       // as large as the piece allows, but the label must stay inside it
-      const fs = Math.min(Math.max(45, Math.min(p.w, p.h) / 4), 100, p.w * 0.85 / (0.68 * Math.max(name.length, 6)), p.h / 2.6);
-      const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
-      return '<rect x="' + p.x + '" y="' + p.y + '" width="' + p.w + '" height="' + p.h + '" fill="#dbeafe" stroke="#1E6FF4" stroke-width="4"/>' +
-        '<text x="' + cx + '" y="' + (cy - fs * 0.15) + '" font-size="' + fs + '" font-weight="700" fill="#15223a" text-anchor="middle">' + esc(p.label) + (p.rot ? " ↻" : "") + '</text>' +
-        '<text x="' + cx + '" y="' + (cy + fs * 1.05) + '" font-size="' + (fs * 0.8) + '" fill="#1552c7" text-anchor="middle">' + fmt(p.w) + '×' + fmt(p.h) + '</text>';
-    }).join("");
+      const fs = Math.min(Math.max(45, Math.min(bw, bh) / 4), 100, bw * 0.85 / (0.68 * Math.max(name.length, 6)), bh / 2.6);
+      const cx = x + w / 2, cy = y + h / 2, rot = turn ? ' transform="rotate(-90 ' + cx + ' ' + cy + ')"' : '';
+      return '<rect x="' + x + '" y="' + y + '" width="' + w + '" height="' + h + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="5"' + (dash ? ' stroke-dasharray="24 12"' : '') + '/>' +
+        '<g' + rot + '><text x="' + cx + '" y="' + (cy - fs * 0.15) + '" font-size="' + fs + '" font-weight="700" fill="' + color + '" text-anchor="middle">' + esc(name) + '</text>' +
+        '<text x="' + cx + '" y="' + (cy + fs * 1.05) + '" font-size="' + (fs * 0.8) + '" fill="' + color + '" text-anchor="middle">' + esc(sub) + '</text></g>';
+    };
+    const g = sh.placed.map(p => box(p.x, p.y, p.w, p.h, p.label + (p.rot ? " ↻" : ""), fmt(p.w) + "×" + fmt(p.h), "#dbeafe", "#1E6FF4", false, "#15223a")).join("") +
+      (sh.left || []).map(l => box(l.x, l.y, l.w, l.h, l.id, lw(l), "url(#offc)", "#16a34a", true, "#14532d")).join("");
+    const left = (sh.left || []).map(l => l.id + " " + lw(l)).join(", ");
     return '<div class="sheet"><svg viewBox="-10 -10 ' + (W + 20) + ' ' + (H + 20) + '" xmlns="http://www.w3.org/2000/svg">' +
+      '<defs><pattern id="offc" patternUnits="userSpaceOnUse" width="48" height="48" patternTransform="rotate(45)"><rect width="48" height="48" fill="#ecfdf5"/><rect width="16" height="48" fill="#bbf7d0"/></pattern></defs>' +
       '<rect x="0" y="0" width="' + W + '" height="' + H + '" fill="#fff" stroke="#64748b" stroke-width="6"/>' + g + '</svg>' +
-      '<div class="cap"><b>Лист ' + (i + 1) + ' · ' + W + '×' + H + ' мм</b> · ' + sh.placed.length + (sh.placed.length === 1 ? ' заготовка' : ' заготовки') + ' · използване ' + Math.round(used) + '%</div></div>';
+      '<div class="cap"><b>' + esc(title) + ' · ' + W + '×' + H + ' мм</b> · ' + sh.placed.length + (sh.placed.length === 1 ? ' заготовка' : ' заготовки') +
+      ' · използване ' + Math.round(used) + '%' + (left ? ' · <span class="offtxt">нова фира: ' + esc(left) + '</span>' : '') + '</div></div>';
   }
 
+  /* ---------- offcut store: kept in this browser, with export / import as backup ---------- */
+  const INV_KEY = "mpr-admin-offcuts-v1";
+  const serial = n => "Ф-" + String(n).padStart(4, "0");
+  const lw = o => Math.max(o.w, o.h) + "×" + Math.min(o.w, o.h);   // offcut size as length × width
+  let INV = loadInv(), CURRENT = null;
+  function loadInv(){
+    try{
+      const d = JSON.parse(localStorage.getItem(INV_KEY) || "null");
+      if(d && Array.isArray(d.items)) return { next:Math.max(1, +d.next || 1), items:d.items, done:d.done || {} };
+    }catch(e){}
+    return { next:1, items:[], done:{} };
+  }
+  function saveInv(){
+    try{ localStorage.setItem(INV_KEY, JSON.stringify(INV)); return true; }
+    catch(e){ stockMsg("⚠ Браузърът не позволява запазване — складът ще се загуби при затваряне. Свалете резервно копие.", "bad"); return false; }
+  }
+  function stockMsg(m, kind){ $("stockStatus").className = "status " + (kind || ""); $("stockStatus").textContent = m; }
+  // an order's identity: the same order loaded again is recognised as already cut
+  function orderKey(){
+    const s = JSON.stringify([order.name, order.phone, order.created, order.tables]);
+    let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return "o" + h.toString(36) + s.length.toString(36);
+  }
+  const orderLabel = () => (order.source || "ръчна поръчка") + (order.name ? " · " + order.name : "");
+  function commitCut(){
+    if(!CURRENT || INV.done[CURRENT.key]) return;
+    const now = new Date().toISOString(), usedIds = CURRENT.used.map(o => o.id);
+    INV.items = INV.items.filter(o => !usedIds.includes(o.id));
+    const added = CURRENT.created.map(c => {
+      const id = serial(INV.next++);
+      INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:1.5, from:c.src + " · " + orderLabel(), added:now });
+      return id;
+    });
+    INV.done[CURRENT.key] = { at:now, label:orderLabel(), used:CURRENT.used.map(o => Object.assign({}, o)), added };
+    saveInv(); renderStock(); recompute();
+    stockMsg("✓ Разкроят е потвърден: взета фира " + (usedIds.join(", ") || "—") + "; добавена " + (added.join(", ") || "—") + ".", "ok");
+  }
+  function undoCut(){
+    const key = CURRENT && CURRENT.key, d = key && INV.done[key];
+    if(!d) return;
+    const gone = d.added.filter(id => !INV.items.some(o => o.id === id));
+    INV.items = INV.items.filter(o => !d.added.includes(o.id));
+    d.used.forEach(u => { if(!INV.items.some(o => o.id === u.id)) INV.items.push(u); });
+    delete INV.done[key];
+    saveInv(); renderStock(); recompute();
+    stockMsg(gone.length ? "⚠ Потвърждението е отменено, но " + gone.join(", ") + " вече не е в склада (използвана в друга поръчка или премахната)."
+                         : "↶ Потвърждението е отменено — складът е както преди поръчката.", gone.length ? "warn" : "ok");
+  }
+  function renderStock(){
+    const items = INV.items.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
+    $("stockList").innerHTML = items.length
+      ? '<div class="tw"><table class="cut stock"><thead><tr><th>№</th><th>Размер (мм)</th><th>Лист</th><th>Произход</th><th>Добавена</th><th></th></tr></thead><tbody>' +
+        items.map(o => '<tr><td class="size">' + esc(o.id) + '</td><td class="size">' + esc(lw(o)).replace('×', ' × ') + '</td><td>' + esc(o.th || 1.5) + ' мм</td><td>' +
+          esc(o.from || "") + '</td><td>' + esc(o.added ? new Date(o.added).toLocaleDateString("bg-BG") : "") +
+          '</td><td><button class="btn danger" data-del="' + esc(o.id) + '" type="button">Премахни</button></td></tr>').join("") +
+        '</tbody></table></div><div class="muted" style="margin-top:6px">' + items.length + (items.length === 1 ? ' парче' : ' парчета') +
+        ' · ' + (items.reduce((a, o) => a + o.w * o.h, 0) / 1e6).toFixed(2) + ' м² · следващ номер ' + serial(INV.next) + '</div>'
+      : '<div class="empty">Складът е празен. Фирата се добавя, когато потвърдите разкроя на поръчка, или ръчно отдолу.</div>';
+    $("stockList").querySelectorAll("[data-del]").forEach(btn => btn.addEventListener("click", () => {
+      if(btn.dataset.armed !== "1"){ btn.dataset.armed = "1"; btn.textContent = "Сигурно? Натисни пак"; return; }
+      INV.items = INV.items.filter(o => o.id !== btn.dataset.del);
+      saveInv(); renderStock(); recompute(); stockMsg("Премахната: " + btn.dataset.del + ".", "");
+    }));
+  }
+  $("addOff").addEventListener("click", () => {
+    const a = Math.round(+$("addW").value || 0), b = Math.round(+$("addH").value || 0);
+    if(a <= 0 || b <= 0){ stockMsg("Въведете дължина и ширина на парчето.", "warn"); return; }
+    const id = serial(INV.next++), w = Math.max(a, b), h = Math.min(a, b);
+    INV.items.push({ id, w, h, th:1.5, from:$("addNote").value.trim() || "добавена ръчно", added:new Date().toISOString() });
+    saveInv(); renderStock(); recompute();
+    $("addW").value = ""; $("addH").value = ""; $("addNote").value = "";
+    stockMsg("✓ Добавена " + id + " (" + w + " × " + h + " мм). Напишете номера върху парчето.", "ok");
+  });
+  $("exportOff").addEventListener("click", () => {
+    const data = { kind:"mpr-offcuts", v:1, saved:new Date().toISOString(), next:INV.next, items:INV.items, done:INV.done };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type:"application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "fira-sklad-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+    stockMsg("⬇ Резервното копие е свалено.", "ok");
+  });
+  $("importOff").addEventListener("click", () => $("importFile").click());
+  $("importFile").addEventListener("change", async () => {
+    const f = $("importFile").files[0]; $("importFile").value = "";
+    if(!f) return;
+    try{
+      const d = JSON.parse(await f.text());
+      if(!d || !Array.isArray(d.items)) throw new Error("bad");
+      let n = 0;
+      d.items.forEach(o => { if(o && o.id && +o.w > 0 && +o.h > 0 && !INV.items.some(x => x.id === o.id)){ INV.items.push(o); n++; } });
+      Object.assign(INV.done, d.done || {});
+      // pieces either copy says were cut stay out of the store
+      const cut = new Set(Object.values(INV.done).flatMap(x => (x.used || []).map(u => u.id)));
+      INV.items = INV.items.filter(o => !cut.has(o.id));
+      const top = Math.max(0, ...INV.items.map(o => +String(o.id).replace(/\D/g, "") || 0));
+      INV.next = Math.max(INV.next, +d.next || 1, top + 1);
+      saveInv(); renderStock(); recompute();
+      stockMsg("✓ Заредено копие: " + n + " нови парчета (общо " + INV.items.length + ").", "ok");
+    }catch(e){ stockMsg("✕ Файлът не е резервно копие на склада.", "bad"); }
+  });
+
+  renderStock();
   buildSettings();
   renderOrder();
 </script>
