@@ -72,12 +72,28 @@
   details.settings .grid{margin-top:12px}
   .hint{font-size:11px;color:var(--muted);font-weight:400}
   .empty{text-align:center;color:var(--muted);padding:20px}
+  .printonly{display:none}
+  .printsum{font-size:13px;line-height:1.6}
+  .printsum b{font-weight:700}
+  /* workshop print: materials summary first, one line per table instead of the inputs, no forced page breaks */
   @media print{
+    @page{size:A4;margin:12mm 10mm}
     body{background:#fff}
-    .noprint,.drop,details.settings,.btn{display:none!important}
-    .card{box-shadow:none;border-color:#ccc;break-inside:avoid-page}
-    .pagebreak{break-before:page}
-    input,textarea{border:none;padding:0;font-weight:700}
+    header{padding:0 0 8px}
+    .wrap{max-width:none;padding:0;display:flex;flex-direction:column}
+    #results{display:contents}
+    .card.summary{order:-1}
+    .noprint,.drop,details.settings,.btn,.editor{display:none!important}
+    .printonly{display:block}
+    .card{box-shadow:none;border:1px solid #cbd5e1;border-top:3px solid var(--brand);padding:10px 12px;margin-bottom:10px}
+    .card h2{margin-bottom:6px;padding-bottom:5px}
+    .card h2,.card h3{break-after:avoid}
+    .tw{overflow:visible}
+    table.cut{min-width:0;font-size:11px}
+    table.cut th,table.cut td{padding:4px 6px}
+    table.cut thead{display:table-header-group}
+    table.cut tr,.tot,.sheet,.bar,.printsum,.warnbox{break-inside:avoid}
+    .sheets{grid-template-columns:1fr 1fr}
   }
 </style>
 </head>
@@ -223,9 +239,10 @@
     $("print").disabled = !order;
     if(!order){ $("order").innerHTML = ""; $("results").innerHTML = ""; return; }
     const created = order.created ? new Date(order.created) : null;
-    let h = '<div class="card"><h2>Клиент</h2><div class="grid">'+
+    let h = '<div class="card"><h2>Клиент</h2><div class="grid editor">'+
       '<label>Име<input type="text" id="o-name" value="'+esc(order.name)+'"></label>'+
       '<label>Телефон<input type="text" id="o-phone" value="'+esc(order.phone)+'"></label></div>'+
+      '<div class="printonly printsum" id="o-print"></div>'+
       '<div class="muted" style="margin-top:8px">'+
         (order.source ? 'Файл: '+esc(order.source) : 'Ръчно въведена поръчка')+
         (created && !isNaN(created) ? ' · Създадена: '+esc(created.toLocaleString("bg-BG")) : '')+
@@ -234,13 +251,13 @@
       h += '<div class="card tbl" data-i="'+i+'">'+
         '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
         (order.tables.length > 1 ? '<button class="btn danger noprint" data-act="del" type="button">✕ Премахни</button>' : '')+
-        '</h2><div class="grid">'+
+        '</h2><div class="printonly printsum"></div><div class="editor"><div class="grid">'+
         FIELDS.map(([k,l,u]) => '<label>'+esc(l)+' <span class="u">('+u+')</span><input type="number" min="0" step="1" data-k="'+k+'" value="'+esc(t[k])+'"></label>').join("")+
         '<label class="chk"><input type="checkbox" data-k="splashOn"'+(t.splashOn?" checked":"")+'> Борд</label>'+
         '<label class="chk"><input type="checkbox" data-k="baseOn"'+(t.baseOn?" checked":"")+'> Долна основа (плот)</label>'+
         '<label class="chk"><input type="checkbox" data-k="midOn"'+(t.midOn?" checked":"")+'> Втори междинен плот</label>'+
         '</div>'+
-        '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes">'+esc(t.notes)+'</textarea></label>'+
+        '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes">'+esc(t.notes)+'</textarea></label></div>'+
         '<div class="cutout"></div></div>';
     });
     h += '<div class="row noprint" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
@@ -390,9 +407,20 @@
       }
     });
 
+    const op = $("o-print");
+    if(op) op.innerHTML = 'Клиент: <b>' + esc(order.name || "—") + '</b> · Телефон: <b>' + esc(order.phone || "—") + '</b>';
+
     // per-table cut lists, inside each table card
     document.querySelectorAll(".tbl").forEach(card => {
       const i = +card.dataset.i, r = per[i], q = order.tables[i].qty;
+      const t = order.tables[i];
+      card.querySelector(".printsum").innerHTML =
+        '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
+        ' · борд: ' + (t.splashOn ? t.splashH + ' мм' : 'НЕ') +
+        ' · задни крака от ръба: ' + t.legBack + ' мм' +
+        ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' : 'НЕ') +
+        ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
+        (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '');
       let h = r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("");
       h += '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
         '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
@@ -413,7 +441,7 @@
     const sheetKg = blankArea * th * 7.93, tubeKg = tubeM * kgPerM;
     const nTables = order.tables.reduce((a, t) => a + t.qty, 0);
 
-    let h = '<div class="card pagebreak"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">' +
+    let h = '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">' +
       tot("Листове " + W + "×" + H + " мм, " + th + " мм", nest.sheets.length + " бр.",
           "заготовки " + blankArea.toFixed(2) + " м²" + (nest.sheets.length ? " · използване " + Math.round(nestedArea / (nest.sheets.length * sheetArea) * 100) + "%" : "")) +
       tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.",
