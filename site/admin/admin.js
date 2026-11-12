@@ -3,7 +3,7 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const DEFAULTS = { topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, feet:0, bendDed:0, tubeWall:1.5,
+  const DEFAULTS = { topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, feet:0, bendDed:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -12,6 +12,7 @@
     ["shelfReturn","Долни плотове — обратно огъване","мм, навътре"],
     ["legInset","Отстъп на краката","мм от страничния и предния ръб на плота"],
     ["shelfGap","Долен плот — намаление дълбочина","мм (за влизане между краката / заварка)"],
+    ["shelfGapW","Долен плот — намаление ширина","мм, общо (за влизане между краката / заварка)"],
     ["feet","Регулируеми крачета","мм височина; 0 = без"],
     ["bendDed","Корекция за огъване","мм на всяко огъване (изважда се от заготовката)"],
     ["tubeWall","Стена на тръбата","мм, за теглото"],
@@ -71,7 +72,7 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 0,       // надценка % — ЗАДАЙ стойността (сега 0 = без надценка)
-    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, thickness:1.5
+    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
@@ -79,7 +80,7 @@
     const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
     const back = t.splashOn ? (+t.splashH||0) : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-2*P.legInset, shD=t.D-(+t.legBack||0)-P.shelfGap;
+    const shL=t.L-2*P.legInset-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }
@@ -269,8 +270,8 @@
     schemes.push({ title:"Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:t.L, plateD:t.D, E, R,
       backUp:!!t.splashOn, splashH:t.splashH, leg:0, blankW:topW, blankD:topD });
 
-    // долният плот: по-малък отзад със заден отстъп (legBack) и още с shelfGap по дълбочина (влизане/заварка)
-    const shL = t.L - 2*I, shD = t.D - t.legBack - S.shelfGap;
+    // долният плот: по-малък по ширина (странични отстъпи + shelfGapW) и по дълбочина (заден отстъп + shelfGap)
+    const shL = t.L - 2*I - S.shelfGapW, shD = t.D - t.legBack - S.shelfGap;
     const shelves = [];
     if(t.baseOn) shelves.push({ name:"Долна основа (плот)", short:"основа", at:t.baseH });
     if(t.midOn) shelves.push({ name:"Втори междинен плот", short:"междинен", at:mid2H(t) });
