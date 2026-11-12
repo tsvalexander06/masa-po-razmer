@@ -98,6 +98,14 @@
   .procbox{display:flex;flex-direction:column;gap:3px;font-size:14px}
   .procbox>div{display:flex;justify-content:space-between;gap:12px}
   .procbox>div.big b{color:var(--brand-dark);font-size:18px}
+  .gate{position:fixed;inset:0;background:linear-gradient(180deg,#cfe0f8,#eef3f9);z-index:1000;display:flex;align-items:center;justify-content:center;padding:20px}
+  .gatebox{background:#fff;border:1px solid #cfdcf0;border-top:3px solid var(--brand);border-radius:14px;padding:22px;max-width:340px;width:100%;box-shadow:0 2px 14px rgba(30,111,244,.14);display:flex;flex-direction:column;gap:11px}
+  .gatebox .gt{font-size:18px;font-weight:800;color:var(--brand)}
+  .gatebox .gs{font-size:13px;color:var(--muted)}
+  .gatebox input[type=password]{padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#fff;color:var(--ink)}
+  .gatebox input[type=password]:focus{outline:none;border-color:var(--brand)}
+  .gremember{font-size:13px;display:flex;gap:8px;align-items:center;color:var(--ink);font-weight:600}
+  .gerr{color:#b91c1c;font-size:13px;font-weight:600;min-height:16px}
   .pricebox{margin-top:10px;background:#f8fafc;border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:14px;display:flex;flex-direction:column;gap:3px}
   .pricebox>div{display:flex;justify-content:space-between;gap:12px}
   .pricebox>div:first-child b{color:var(--brand-dark);font-size:17px}
@@ -231,6 +239,17 @@
   </section>
 </div>
 
+<div id="gate" class="gate">
+  <div class="gatebox">
+    <div class="gt">KONVEKTOMAT.STORE · Админ</div>
+    <div class="gs">Въведи парола за достъп.</div>
+    <input type="password" id="gatePass" autocomplete="current-password" placeholder="Парола" autofocus>
+    <label class="gremember"><input type="checkbox" id="gateRemember" checked> Запомни на това устройство</label>
+    <button class="btn primary" type="button" id="gateBtn">Вход</button>
+    <div class="gerr" id="gateErr"></div>
+  </div>
+</div>
+<script src="gate.js"></script>
 <script src="admin.js"></script>
 </body>
 </html>

@@ -38,7 +38,7 @@ jobs:
         run: |
           V="${GITHUB_SHA::8}"
           sed -i "s#src=\"app.js\"#src=\"app.js?v=$V\"#; s#vendor/jspdf-2.5.1.umd.min.js#vendor/jspdf-2.5.1.umd.min.js?v=$V#" site/index.html
-          sed -i "s#src=\"admin.js\"#src=\"admin.js?v=$V\"#" site/admin/index.html
+          sed -i "s#src=\"admin.js\"#src=\"admin.js?v=$V\"#; s#src=\"gate.js\"#src=\"gate.js?v=$V\"#" site/admin/index.html
           echo "Versioned assets with v=$V"
 
       - name: Upload site as Pages artifact
