@@ -462,15 +462,42 @@
     return o;
   }
 
-  /* ===== ЦЕНА =====
-     Формулата за автоматичната цена ще бъде добавена по-късно.
-     Получава целия обект на поръчката (без цената) и трябва да върне:
-       { total:<число>, currency:"лв.", lines:[{label:"...", amount:<число>}, ...] }
-     или null, ако още няма формула. Смятайте от order.tables[i] (L, D, H, splashOn,
-     baseOn, midOn, legBack ...). Същата функция ще се сложи и в admin, за да се
-     преизчислява цената и клиент да не може да я подмени. */
+  /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО в app.js и admin/admin.js =====
+     Цена = (материал по площ + тръба по дължина + заварки + огъвания) × (1 + надценка%).
+     - материал: площ на разгъвката × PRICE.sheetM2 (€/м²)
+     - тръба: дължина на краката × PRICE.tubeM (€/м)
+     - заварки: 48€ на етаж (12см × 4 крака × 1€/см) — плот + всеки долен плот
+     - огъвания: 0.5€ на огъване */
+  const PRICE = {
+    sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
+    tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
+    weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
+    bend: 0.5,          // € за огъване (90°)
+    markupPct: 0,       // надценка % — ЗАДАЙ стойността (сега 0 = без надценка)
+    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, thickness:1.5
+  };
+  const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
+  const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  function pBlankM2(t){
+    const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
+    const back = t.splashOn ? (+t.splashH||0) : ft;
+    const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
+    const shL=t.L-2*P.legInset, shD=t.D-P.legInset-(+t.legBack||0);
+    const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
+    return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
+  }
+  const pTubeM = t => 4*Math.max(0,(t.H - PRICE.thickness))/1000;
+  function priceParts(t){
+    const mat=pBlankM2(t)*PRICE.sheetM2, tube=pTubeM(t)*PRICE.tubeM,
+          weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
+    return { mat, tube, weld, bend, base:mat+tube+weld+bend };
+  }
   function priceFor(order){
-    return null; // TODO: реална формула (идва по-късно)
+    if(!order||!order.tables||!order.tables.length) return null;
+    const m=1+PRICE.markupPct/100; let total=0; const lines=[];
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, per=priceParts(t).base*m;
+      total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    return { total, currency:"€", lines };
   }
 
   /* Tamper-evidence signature over the order (HMAC-SHA256).

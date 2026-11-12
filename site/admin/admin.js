@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const DEFAULTS = { topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, feet:0, bendDed:0, tubeWall:1.5,
-                     tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:0, sheet2W:2500, sheet2H:1250, sheet2Price:0 };
+                     tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
     ["topReturn","Работен плот — обратно огъване","мм, навътре под плота"],
@@ -22,13 +22,18 @@
     ["sheetPrice","Лист 1 — цена","€ за брой; 0 = сравнение по площ"],
     ["sheet2W","Лист 2 — дължина","мм; 0 = не се ползва"],
     ["sheet2H","Лист 2 — ширина","мм"],
-    ["sheet2Price","Лист 2 — цена","€ за брой; 0 = сравнение по площ"],
+    ["sheet2Price","Лист 2 — цена","€ за брой"],
+    ["tubePrice","Тръба — цена","€ за прът (6 м)"],
   ];
   const KEY = "mpr-admin-settings-v1";
   let S = loadSettings();
   function loadSettings(){
-    try{ return Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(KEY) || "{}")); }
-    catch(e){ return Object.assign({}, DEFAULTS); }
+    let s;
+    try{ s = Object.assign({}, DEFAULTS, JSON.parse(localStorage.getItem(KEY) || "{}")); }
+    catch(e){ s = Object.assign({}, DEFAULTS); }
+    // a 0 material price means it was never set on this device — use the real defaults
+    ["sheetPrice","sheet2Price","tubePrice"].forEach(k => { if(!(+s[k] > 0)) s[k] = DEFAULTS[k]; });
+    return s;
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
   function buildSettings(){
@@ -56,6 +61,42 @@
   }
   // same formula as the customer form: halfway between the base and the underside of the top
   const mid2H = t => Math.round((t.baseH + Math.max(0, t.H - 40)) / 2);
+
+  /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО с site/app.js =====
+     Цена = (материал по площ + тръба по дължина + заварки + огъвания) × (1 + надценка%). */
+  const PRICE = {
+    sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
+    tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
+    weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
+    bend: 0.5,          // € за огъване (90°)
+    markupPct: 0,       // надценка % — ЗАДАЙ стойността (сега 0 = без надценка)
+    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, thickness:1.5
+  };
+  const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
+  const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  function pBlankM2(t){
+    const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
+    const back = t.splashOn ? (+t.splashH||0) : ft;
+    const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
+    const shL=t.L-2*P.legInset, shD=t.D-P.legInset-(+t.legBack||0);
+    const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
+    return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
+  }
+  const pTubeM = t => 4*Math.max(0,(t.H - PRICE.thickness))/1000;
+  function priceParts(t){
+    const mat=pBlankM2(t)*PRICE.sheetM2, tube=pTubeM(t)*PRICE.tubeM,
+          weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
+    return { mat, tube, weld, bend, base:mat+tube+weld+bend };
+  }
+  function priceFor(order){
+    if(!order||!order.tables||!order.tables.length) return null;
+    const m=1+PRICE.markupPct/100; let total=0; const lines=[];
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, per=priceParts(t).base*m;
+      total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    return { total, currency:"€", lines };
+  }
+  const eur2 = v => (v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €");
+  let PRICING = null; // latest computed pricing for the loaded order (set in recompute)
 
   // the customer form stores "MPR1:<base64 JSON>" in the PDF's Keywords field
   function decodeOrderFromPdf(buf){
@@ -142,20 +183,21 @@
     const aid = (order.orderNo||"").trim() || orderKey();
     const prev = ARCH.orders.find(o => o.id === aid);
     const a = order.archive || {};
-    const pfPrice = (a.price!=null && a.price!=="") ? a.price : (prev ? prev.price : (order.priceFromPdf && order.priceFromPdf.total!=null ? order.priceFromPdf.total : ""));
+    const pfPrice = (a.price!=null && a.price!=="") ? a.price : (prev ? prev.price : "");  // ръчна продажна цена
     const pfPlace = (a.place!=null ? a.place : (prev ? prev.place : "")) || "";
     const pfDate  = (a.deliveryDate!=null ? a.deliveryDate : (prev ? prev.deliveryDate : "")) || "";
     const docNote = order.doc ? ("Документ за прикачане: " + esc(order.doc.name))
       : (prev && prev.hasDoc ? ("Запазен документ: " + esc(prev.docName||"PDF")) : "Без документ — заредете PDF на поръчката, за да се запази.");
     h += '<div class="card noprint" id="archPanel"><h2>Запазване в архива</h2>'+
       (order.orderNo ? '<div class="muted">Поръчка № <b>'+esc(order.orderNo)+'</b></div>' : '<div class="muted">Поръчка без номер — ще се запише с вътрешен номер.</div>')+
-      '<div class="grid" style="margin-top:8px">'+
-      '<label>Цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'"'+(order.priceFromPdf&&order.priceFromPdf.total!=null?' placeholder="от поръчката: '+esc(order.priceFromPdf.total)+'"':'')+'></label>'+
+      '<div class="pricebox" id="archCalc"></div>'+
+      '<div class="grid" style="margin-top:10px">'+
+      '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'" placeholder="колко е продадена"></label>'+
       '<label>Място на доставка<input type="text" id="arch-place" value="'+esc(pfPlace)+'" placeholder="адрес или обект"></label>'+
       '<label>Дата на доставка<input type="date" id="arch-ddate" value="'+esc(pfDate)+'"></label>'+
       '</div>'+
       '<div class="row"><button class="btn primary" id="archSave" type="button">'+(prev?'Обнови в архива':'Запази в архива')+'</button></div>'+
-      '<div class="muted" style="margin-top:6px">'+docNote+'</div></div>';
+      '<div class="muted" style="margin-top:6px">'+docNote+'. Цената за клиента и себестойността се смятат автоматично; „Продажна цена“ въвеждате ръчно.</div></div>';
     order.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="'+i+'">'+
         '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
@@ -567,6 +609,25 @@
     const money = v => nest.priced ? "€ " + v.toFixed(2) : v.toFixed(2) + " м²";
     const ids = list => list.length ? list.join(", ") : "—";
 
+    /* ---- price of the order ----
+       Our cost: whole sheets actually needed (offcuts are free) + tube sticks.
+       Welds + bends are our labour. Client price (quote) is the shared formula. */
+    const sheetCostOurs = nest.sheets.reduce((a, sh) => a + (sh.type.offcut ? 0 : (+sh.type.price || 0)), 0);
+    const tubeCostOurs = bars.bars.length * (+S.tubePrice || 0);
+    let weldOurs = 0, bendOurs = 0;
+    order.tables.forEach((t, i) => { const q = order.tables[i].qty, p = priceParts(t); weldOurs += p.weld*q; bendOurs += p.bend*q; });
+    const costMaterials = sheetCostOurs + tubeCostOurs;      // материали (себестойност)
+    const costTotal = costMaterials + weldOurs + bendOurs;   // пълна себестойност
+    const client = priceFor({ tables: order.tables });       // цена за клиента (с надценка)
+    PRICING = { client: client ? client.total : 0, costMaterials, weld: weldOurs, bend: bendOurs, costTotal };
+    const ac = $("archCalc");
+    if(ac) ac.innerHTML =
+      '<div><span>Цена за клиента</span><b>'+esc(eur2(PRICING.client))+'</b></div>'+
+      '<div><span>Себестойност материали (листове + тръба)</span><b>'+esc(eur2(costMaterials))+'</b></div>'+
+      '<div><span>Заварки</span><b>'+esc(eur2(weldOurs))+'</b></div>'+
+      '<div><span>Огъвания</span><b>'+esc(eur2(bendOurs))+'</b></div>'+
+      '<div><span>Себестойност общо</span><b>'+esc(eur2(costTotal))+'</b></div>';
+
     let h = '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
     if(oc.used.length) h += tot("Фира от склада", oc.used.length + " бр.", oc.used.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + ")").join(", "));
     types.forEach(t => {
@@ -766,10 +827,14 @@
     if(!order) return;
     const id=(order.orderNo||"").trim() || orderKey();
     const priceIn=$("arch-price")?$("arch-price").value.trim():"";
+    const P = PRICING || {};
     const rec={
       id, orderNo:(order.orderNo||"").trim(), savedAt:new Date().toISOString(), created:order.created||"",
       name:($("o-name")?$("o-name").value:order.name||"").trim(), phone:($("o-phone")?$("o-phone").value:order.phone||"").trim(),
-      price: priceIn!=="" ? +priceIn : (order.priceFromPdf&&order.priceFromPdf.total!=null ? +order.priceFromPdf.total : null),
+      price: priceIn!=="" ? +priceIn : null,                                   // продажна цена (ръчна)
+      clientPrice: P.client!=null ? P.client : null,                          // цена за клиента (авто)
+      cost: P.costTotal!=null ? P.costTotal : null,                           // себестойност общо
+      costMaterials: P.costMaterials!=null ? P.costMaterials : null,
       place:($("arch-place")?$("arch-place").value:"").trim(), deliveryDate:$("arch-ddate")?$("arch-ddate").value:"",
       source:order.source||"",
       tables:order.tables.map(t=>({L:t.L,D:t.D,H:t.H,qty:t.qty,splashOn:t.splashOn,splashH:t.splashH,legBack:t.legBack,baseOn:t.baseOn,baseH:t.baseH,midOn:t.midOn,notes:t.notes})),
@@ -808,13 +873,15 @@
     let list=ARCH.orders.slice().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
     if(q) list=list.filter(o=>((o.orderNo||"")+" "+(o.name||"")+" "+(o.phone||"")+" "+(o.place||"")).toLowerCase().includes(q));
     $("archiveList").innerHTML = list.length
-      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Запазена</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
+      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Запазена</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Клиентска цена</th><th>Себестойност</th><th>Продажна</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
         list.map(o=>'<tr>'+
           '<td class="size">'+esc(o.orderNo||"—")+'</td>'+
           '<td>'+esc(o.savedAt?new Date(o.savedAt).toLocaleDateString("bg-BG"):"")+'</td>'+
           '<td>'+esc(o.name||"—")+'</td>'+
           '<td>'+esc(o.phone||"—")+'</td>'+
           '<td class="q">'+o.tables.reduce((a,t)=>a+(t.qty||1),0)+'</td>'+
+          '<td class="size">'+esc(eur(o.clientPrice))+'</td>'+
+          '<td class="size">'+esc(eur(o.cost))+'</td>'+
           '<td class="size">'+esc(eur(o.price))+'</td>'+
           '<td>'+esc(o.place||"—")+(o.deliveryDate?' · '+esc(o.deliveryDate):"")+'</td>'+
           '<td>'+(o.hasDoc?'<button class="btn" data-doc="'+esc(o.id)+'" type="button">Отвори</button>':'—')+'</td>'+
