@@ -83,6 +83,9 @@
   .donebox{background:#ecfdf5;border:1px solid #bbf7d0;color:#14532d;border-radius:8px;padding:8px 10px;font-size:13px;font-weight:600}
   .offtxt{color:#15803d;font-weight:700}
   table.stock{min-width:560px}
+  table.arch{min-width:760px}
+  #archPanel{border-top-color:#16a34a}
+  #archSearch{width:100%}
   .printonly{display:none}
   .printsum{font-size:13px;line-height:1.6}
   .printsum b{font-weight:700}
@@ -159,6 +162,19 @@
       <input type="file" id="importFile" accept=".json,application/json" hidden>
     </div>
     <div class="status" id="stockStatus"></div>
+  </div>
+
+  <div class="card noprint" id="archiveCard">
+    <h2>Архив на поръчките</h2>
+    <div class="muted">Всички запазени поръчки на това устройство — номер, клиент, цена, доставка и документът (PDF). Търсете по номер, клиент, телефон или място. Списъкът се пази в този браузър; свалете резервно копие, за да го пренесете или подсигурите.</div>
+    <input type="text" id="archSearch" placeholder="Търсене по номер, клиент, телефон, място..." style="margin-top:10px">
+    <div id="archiveList" style="margin-top:10px"></div>
+    <div class="row">
+      <button class="btn" id="archExport" type="button">⬇ Свали резервно копие (с документите)</button>
+      <button class="btn" id="archImport" type="button">⬆ Зареди копие</button>
+      <input type="file" id="archImportFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="status" id="archStatus"></div>
   </div>
 
   <div class="card noprint">

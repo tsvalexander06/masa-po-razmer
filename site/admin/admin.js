@@ -81,18 +81,23 @@
         const data = JSON.parse(await file.text());
         if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_json");
         order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:data.source || file.name,
+                  orderNo:data.orderNo || "", priceFromPdf:data.price || null, doc:null, archive:{},
                   tables:data.tables.map(normTable) };
         setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
         renderOrder();
         return;
       }
-      const data = decodeOrderFromPdf(await file.arrayBuffer());
+      const buf = await file.arrayBuffer();
+      const data = decodeOrderFromPdf(buf);
+      // keep the PDF so it can be saved as the order's document in the archive
+      const doc = { bytes:buf.slice(0), name:file.name };
       if(data){
         order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:file.name,
+                  orderNo:data.orderNo || "", priceFromPdf:data.price || null, doc, archive:{},
                   tables:data.tables.map(normTable) };
         setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
       }else{
-        order = { name:"", phone:"", created:"", source:file.name, tables:[normTable({})] };
+        order = { name:"", phone:"", created:"", source:file.name, orderNo:"", priceFromPdf:null, doc, archive:{}, tables:[normTable({})] };
         setStatus("⚠ В „" + file.name + "“ няма данни за поръчката — вероятно е създаден преди обновлението на формата. Въведете размерите от PDF-а ръчно по-долу.", "warn");
       }
       renderOrder();
@@ -110,7 +115,7 @@
   ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
   drop.addEventListener("drop", e => loadFile(e.dataTransfer.files[0]));
   $("manual").addEventListener("click", () => {
-    order = { name:"", phone:"", created:"", source:"", tables:[normTable({})] };
+    order = { name:"", phone:"", created:"", source:"", orderNo:"", priceFromPdf:null, doc:null, archive:{}, tables:[normTable({})] };
     setStatus("Ръчна поръчка — въведете размерите.", "");
     renderOrder();
   });
@@ -133,6 +138,24 @@
         (order.source ? 'Файл: '+esc(order.source) : 'Ръчно въведена поръчка')+
         (created && !isNaN(created) ? ' · Създадена: '+esc(created.toLocaleString("bg-BG")) : '')+
       '</div></div>';
+    // --- save-to-archive panel ---
+    const aid = (order.orderNo||"").trim() || orderKey();
+    const prev = ARCH.orders.find(o => o.id === aid);
+    const a = order.archive || {};
+    const pfPrice = (a.price!=null && a.price!=="") ? a.price : (prev ? prev.price : (order.priceFromPdf && order.priceFromPdf.total!=null ? order.priceFromPdf.total : ""));
+    const pfPlace = (a.place!=null ? a.place : (prev ? prev.place : "")) || "";
+    const pfDate  = (a.deliveryDate!=null ? a.deliveryDate : (prev ? prev.deliveryDate : "")) || "";
+    const docNote = order.doc ? ("Документ за прикачане: " + esc(order.doc.name))
+      : (prev && prev.hasDoc ? ("Запазен документ: " + esc(prev.docName||"PDF")) : "Без документ — заредете PDF на поръчката, за да се запази.");
+    h += '<div class="card noprint" id="archPanel"><h2>Запазване в архива</h2>'+
+      (order.orderNo ? '<div class="muted">Поръчка № <b>'+esc(order.orderNo)+'</b></div>' : '<div class="muted">Поръчка без номер — ще се запише с вътрешен номер.</div>')+
+      '<div class="grid" style="margin-top:8px">'+
+      '<label>Цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'"'+(order.priceFromPdf&&order.priceFromPdf.total!=null?' placeholder="от поръчката: '+esc(order.priceFromPdf.total)+'"':'')+'></label>'+
+      '<label>Място на доставка<input type="text" id="arch-place" value="'+esc(pfPlace)+'" placeholder="адрес или обект"></label>'+
+      '<label>Дата на доставка<input type="date" id="arch-ddate" value="'+esc(pfDate)+'"></label>'+
+      '</div>'+
+      '<div class="row"><button class="btn primary" id="archSave" type="button">'+(prev?'Обнови в архива':'Запази в архива')+'</button></div>'+
+      '<div class="muted" style="margin-top:6px">'+docNote+'</div></div>';
     order.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="'+i+'">'+
         '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
@@ -151,6 +174,11 @@
 
     $("o-name").addEventListener("input", e => order.name = e.target.value);
     $("o-phone").addEventListener("input", e => order.phone = e.target.value);
+    // keep the archive fields on the order so they survive re-renders (e.g. adding a table)
+    $("arch-price").addEventListener("input", e => { (order.archive=order.archive||{}).price = e.target.value; });
+    $("arch-place").addEventListener("input", e => { (order.archive=order.archive||{}).place = e.target.value; });
+    $("arch-ddate").addEventListener("input", e => { (order.archive=order.archive||{}).deliveryDate = e.target.value; });
+    $("archSave").addEventListener("click", saveToArchive);
     $("addT").addEventListener("click", () => { order.tables.push(normTable({})); renderOrder(); });
     document.querySelectorAll(".tbl").forEach(card => {
       const t = order.tables[+card.dataset.i];
@@ -713,6 +741,120 @@
     }catch(e){ stockMsg("✕ Файлът не е резервно копие на склада.", "bad"); }
   });
 
+  /* ---------- orders archive ----------
+     Metadata lives in localStorage; the order PDFs live in IndexedDB (too big for localStorage).
+     Backup/restore carries both. Everything stays in this browser — nothing is uploaded. */
+  const ARCH_KEY="mpr-admin-orders-v1";
+  let ARCH=loadArch();
+  function loadArch(){ try{ const d=JSON.parse(localStorage.getItem(ARCH_KEY)||"null"); if(d&&Array.isArray(d.orders)) return d; }catch(e){} return {orders:[]}; }
+  function saveArch(){ try{ localStorage.setItem(ARCH_KEY,JSON.stringify(ARCH)); return true; }catch(e){ archMsg("⚠ Браузърът не позволява запазване — свалете резервно копие.","bad"); return false; } }
+  function archMsg(m,k){ $("archStatus").className="status "+(k||""); $("archStatus").textContent=m; }
+  function eur(v){ return v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €"; }
+
+  // IndexedDB document store (one PDF per order id)
+  const DB_NAME="mpr-admin", DB_STORE="docs";
+  function idb(){ return new Promise((res,rej)=>{ let r; try{ r=indexedDB.open(DB_NAME,1); }catch(e){ return rej(e); }
+    r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(DB_STORE)) r.result.createObjectStore(DB_STORE); };
+    r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+  async function docPut(id,blob,name){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).put({blob,name},id); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  async function docGet(id){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,"readonly"); const rq=tx.objectStore(DB_STORE).get(id); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
+  async function docDel(id){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(DB_STORE,"readwrite"); tx.objectStore(DB_STORE).delete(id); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=rej; r.readAsDataURL(blob); }); }
+  function b64ToBlob(b64,type){ const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new Blob([u],{type:type||"application/pdf"}); }
+
+  async function saveToArchive(){
+    if(!order) return;
+    const id=(order.orderNo||"").trim() || orderKey();
+    const priceIn=$("arch-price")?$("arch-price").value.trim():"";
+    const rec={
+      id, orderNo:(order.orderNo||"").trim(), savedAt:new Date().toISOString(), created:order.created||"",
+      name:($("o-name")?$("o-name").value:order.name||"").trim(), phone:($("o-phone")?$("o-phone").value:order.phone||"").trim(),
+      price: priceIn!=="" ? +priceIn : (order.priceFromPdf&&order.priceFromPdf.total!=null ? +order.priceFromPdf.total : null),
+      place:($("arch-place")?$("arch-place").value:"").trim(), deliveryDate:$("arch-ddate")?$("arch-ddate").value:"",
+      source:order.source||"",
+      tables:order.tables.map(t=>({L:t.L,D:t.D,H:t.H,qty:t.qty,splashOn:t.splashOn,splashH:t.splashH,legBack:t.legBack,baseOn:t.baseOn,baseH:t.baseH,midOn:t.midOn,notes:t.notes})),
+      hasDoc:false, docName:""
+    };
+    if(order.doc&&order.doc.bytes){
+      try{ await docPut(id,new Blob([order.doc.bytes],{type:"application/pdf"}),order.doc.name); rec.hasDoc=true; rec.docName=order.doc.name; }
+      catch(e){ rec.hasDoc=false; }
+    }else{ const p=ARCH.orders.find(o=>o.id===id); if(p&&p.hasDoc){ rec.hasDoc=true; rec.docName=p.docName; } }
+    const i=ARCH.orders.findIndex(o=>o.id===id);
+    if(i>=0) ARCH.orders[i]=rec; else ARCH.orders.unshift(rec);
+    saveArch(); renderArchive();
+    archMsg("✓ Запазена в архива"+(rec.orderNo?" ("+rec.orderNo+")":"")+". "+(rec.hasDoc?"Документът е прикачен.":"Без документ."), "ok");
+    $("archiveCard").scrollIntoView({behavior:"smooth", block:"start"});
+  }
+  function openArchived(id){
+    const o=ARCH.orders.find(x=>x.id===id); if(!o) return;
+    order={ name:o.name, phone:o.phone, created:o.created, source:o.orderNo?("Архив: "+o.orderNo):"Архив",
+      orderNo:o.orderNo, priceFromPdf:(o.price!=null?{total:o.price,currency:"€"}:null), doc:null,
+      archive:{ price:o.price!=null?o.price:"", place:o.place, deliveryDate:o.deliveryDate }, tables:o.tables.map(normTable) };
+    setStatus("Заредена от архива: "+(o.orderNo||"поръчка")+". (Документът остава в архива — заредете PDF, за да го замените.)","ok");
+    renderOrder(); window.scrollTo({top:0,behavior:"smooth"});
+  }
+  async function openDoc(id){
+    try{ const d=await docGet(id); if(!d){ archMsg("Документът липсва на това устройство.","warn"); return; }
+      const url=URL.createObjectURL(d.blob); const a=document.createElement("a"); a.href=url; a.download=d.name||("poruchka-"+id+".pdf");
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+    }catch(e){ archMsg("Грешка при отваряне на документа.","bad"); }
+  }
+  async function removeArchived(id){
+    ARCH.orders=ARCH.orders.filter(o=>o.id!==id); saveArch(); try{ await docDel(id); }catch(e){}
+    renderArchive(); archMsg("Премахната от архива.","");
+  }
+  function renderArchive(){
+    const q=($("archSearch").value||"").toLowerCase().trim();
+    let list=ARCH.orders.slice().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
+    if(q) list=list.filter(o=>((o.orderNo||"")+" "+(o.name||"")+" "+(o.phone||"")+" "+(o.place||"")).toLowerCase().includes(q));
+    $("archiveList").innerHTML = list.length
+      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Запазена</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
+        list.map(o=>'<tr>'+
+          '<td class="size">'+esc(o.orderNo||"—")+'</td>'+
+          '<td>'+esc(o.savedAt?new Date(o.savedAt).toLocaleDateString("bg-BG"):"")+'</td>'+
+          '<td>'+esc(o.name||"—")+'</td>'+
+          '<td>'+esc(o.phone||"—")+'</td>'+
+          '<td class="q">'+o.tables.reduce((a,t)=>a+(t.qty||1),0)+'</td>'+
+          '<td class="size">'+esc(eur(o.price))+'</td>'+
+          '<td>'+esc(o.place||"—")+(o.deliveryDate?' · '+esc(o.deliveryDate):"")+'</td>'+
+          '<td>'+(o.hasDoc?'<button class="btn" data-doc="'+esc(o.id)+'" type="button">Отвори</button>':'—')+'</td>'+
+          '<td style="white-space:nowrap"><button class="btn" data-open="'+esc(o.id)+'" type="button">Зареди</button> <button class="btn danger" data-rm="'+esc(o.id)+'" type="button">Премахни</button></td>'+
+        '</tr>').join("")+'</tbody></table></div>'+
+        '<div class="muted" style="margin-top:6px">'+list.length+(q?' от '+ARCH.orders.length:'')+(ARCH.orders.length===1?' поръчка':' поръчки')+'</div>'
+      : '<div class="empty">'+(ARCH.orders.length?"Няма съвпадения.":"Архивът е празен. Заредете поръчка и натиснете „Запази в архива“.")+'</div>';
+    $("archiveList").querySelectorAll("[data-doc]").forEach(b=>b.addEventListener("click",()=>openDoc(b.dataset.doc)));
+    $("archiveList").querySelectorAll("[data-open]").forEach(b=>b.addEventListener("click",()=>openArchived(b.dataset.open)));
+    $("archiveList").querySelectorAll("[data-rm]").forEach(b=>b.addEventListener("click",()=>{
+      if(b.dataset.armed!=="1"){ b.dataset.armed="1"; b.textContent="Сигурно? Натисни пак"; return; } removeArchived(b.dataset.rm);
+    }));
+  }
+  $("archSearch").addEventListener("input", renderArchive);
+  $("archExport").addEventListener("click", async ()=>{
+    archMsg("Подготвям копие с документите...","");
+    const out={ kind:"mpr-orders", v:1, saved:new Date().toISOString(), orders:[] };
+    for(const o of ARCH.orders){ const rec=Object.assign({},o);
+      if(o.hasDoc){ try{ const d=await docGet(o.id); if(d){ rec.doc=await blobToB64(d.blob); rec.docName=d.name; } }catch(e){} }
+      out.orders.push(rec);
+    }
+    const url=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:"application/json"}));
+    const a=document.createElement("a"); a.href=url; a.download="arhiv-poruchki-"+new Date().toISOString().slice(0,10)+".json";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
+    archMsg("⬇ Резервното копие е свалено ("+ARCH.orders.length+" поръчки).","ok");
+  });
+  $("archImport").addEventListener("click", ()=>$("archImportFile").click());
+  $("archImportFile").addEventListener("change", async ()=>{
+    const f=$("archImportFile").files[0]; $("archImportFile").value=""; if(!f) return;
+    try{ const d=JSON.parse(await f.text()); if(!d||!Array.isArray(d.orders)) throw new Error("bad");
+      let n=0;
+      for(const o of d.orders){ if(!o||!o.id) continue;
+        if(o.doc){ try{ await docPut(o.id,b64ToBlob(o.doc,"application/pdf"),o.docName||o.id+".pdf"); o.hasDoc=true; }catch(e){} delete o.doc; }
+        const i=ARCH.orders.findIndex(x=>x.id===o.id); if(i>=0) ARCH.orders[i]=o; else ARCH.orders.push(o); n++;
+      }
+      saveArch(); renderArchive(); archMsg("✓ Заредени "+n+" поръчки от копието (общо "+ARCH.orders.length+").","ok");
+    }catch(e){ archMsg("✕ Файлът не е резервно копие на архива.","bad"); }
+  });
+
   renderStock();
+  renderArchive();
   buildSettings();
   renderOrder();
