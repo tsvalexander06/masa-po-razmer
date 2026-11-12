@@ -71,7 +71,7 @@
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
-    markupPct: 0,       // надценка % — ЗАДАЙ стойността (сега 0 = без надценка)
+    markupPct: 100,     // надценка % (клиентска цена = формула × 2)
     topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
@@ -171,7 +171,8 @@
   ];
   function renderOrder(){
     $("print").disabled = !order;
-    if(!order){ $("order").innerHTML = ""; $("results").innerHTML = ""; return; }
+    $("clearOrder").style.display = order ? "inline-flex" : "none";
+    if(!order){ $("order").innerHTML = ""; $("results").innerHTML = ""; renderProcessing(); return; }
     const created = order.created ? new Date(order.created) : null;
     let h = '<div class="card"><h2>Клиент</h2><div class="grid editor">'+
       '<label>Име<input type="text" id="o-name" value="'+esc(order.name)+'"></label>'+
@@ -181,25 +182,6 @@
         (order.source ? 'Файл: '+esc(order.source) : 'Ръчно въведена поръчка')+
         (created && !isNaN(created) ? ' · Създадена: '+esc(created.toLocaleString("bg-BG")) : '')+
       '</div></div>';
-    // --- save-to-archive panel ---
-    const aid = (order.orderNo||"").trim() || orderKey();
-    const prev = ARCH.orders.find(o => o.id === aid);
-    const a = order.archive || {};
-    const pfPrice = (a.price!=null && a.price!=="") ? a.price : (prev ? prev.price : "");  // ръчна продажна цена
-    const pfPlace = (a.place!=null ? a.place : (prev ? prev.place : "")) || "";
-    const pfDate  = (a.deliveryDate!=null ? a.deliveryDate : (prev ? prev.deliveryDate : "")) || "";
-    const docNote = order.doc ? ("Документ за прикачане: " + esc(order.doc.name))
-      : (prev && prev.hasDoc ? ("Запазен документ: " + esc(prev.docName||"PDF")) : "Без документ — заредете PDF на поръчката, за да се запази.");
-    h += '<div class="card noprint" id="archPanel"><h2>Запазване в архива</h2>'+
-      (order.orderNo ? '<div class="muted">Поръчка № <b>'+esc(order.orderNo)+'</b></div>' : '<div class="muted">Поръчка без номер — ще се запише с вътрешен номер.</div>')+
-      '<div class="pricebox" id="archCalc"></div>'+
-      '<div class="grid" style="margin-top:10px">'+
-      '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'" placeholder="колко е продадена"></label>'+
-      '<label>Място на доставка<input type="text" id="arch-place" value="'+esc(pfPlace)+'" placeholder="адрес или обект"></label>'+
-      '<label>Дата на доставка<input type="date" id="arch-ddate" value="'+esc(pfDate)+'"></label>'+
-      '</div>'+
-      '<div class="row"><button class="btn primary" id="archSave" type="button">'+(prev?'Обнови в архива':'Запази в архива')+'</button></div>'+
-      '<div class="muted" style="margin-top:6px">'+docNote+'. Цената за клиента и себестойността се смятат автоматично; „Продажна цена“ въвеждате ръчно.</div></div>';
     order.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="'+i+'">'+
         '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
@@ -216,13 +198,8 @@
     h += '<div class="row noprint" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
     $("order").innerHTML = h;
 
-    $("o-name").addEventListener("input", e => order.name = e.target.value);
-    $("o-phone").addEventListener("input", e => order.phone = e.target.value);
-    // keep the archive fields on the order so they survive re-renders (e.g. adding a table)
-    $("arch-price").addEventListener("input", e => { (order.archive=order.archive||{}).price = e.target.value; });
-    $("arch-place").addEventListener("input", e => { (order.archive=order.archive||{}).place = e.target.value; });
-    $("arch-ddate").addEventListener("input", e => { (order.archive=order.archive||{}).deliveryDate = e.target.value; });
-    $("archSave").addEventListener("click", saveToArchive);
+    $("o-name").addEventListener("input", e => { order.name = e.target.value; renderProcessing(); });
+    $("o-phone").addEventListener("input", e => { order.phone = e.target.value; renderProcessing(); });
     $("addT").addEventListener("click", () => { order.tables.push(normTable({})); renderOrder(); });
     document.querySelectorAll(".tbl").forEach(card => {
       const t = order.tables[+card.dataset.i];
@@ -623,13 +600,7 @@
     const costTotal = costMaterials + weldOurs + bendOurs;   // пълна себестойност
     const client = priceFor({ tables: order.tables });       // цена за клиента (с надценка)
     PRICING = { client: client ? client.total : 0, costMaterials, weld: weldOurs, bend: bendOurs, costTotal };
-    const ac = $("archCalc");
-    if(ac) ac.innerHTML =
-      '<div><span>Цена за клиента</span><b>'+esc(eur2(PRICING.client))+'</b></div>'+
-      '<div><span>Себестойност материали (листове + тръба)</span><b>'+esc(eur2(costMaterials))+'</b></div>'+
-      '<div><span>Заварки</span><b>'+esc(eur2(weldOurs))+'</b></div>'+
-      '<div><span>Огъвания</span><b>'+esc(eur2(bendOurs))+'</b></div>'+
-      '<div><span>Себестойност общо</span><b>'+esc(eur2(costTotal))+'</b></div>';
+    renderProcessing();
 
     let h = '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
     if(oc.used.length) h += tot("Фира от склада", oc.used.length + " бр.", oc.used.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + ")").join(", "));
@@ -810,10 +781,11 @@
      Backup/restore carries both. Everything stays in this browser — nothing is uploaded. */
   const ARCH_KEY="mpr-admin-orders-v1";
   let ARCH=loadArch();
-  function loadArch(){ try{ const d=JSON.parse(localStorage.getItem(ARCH_KEY)||"null"); if(d&&Array.isArray(d.orders)) return d; }catch(e){} return {orders:[]}; }
+  function loadArch(){ try{ const d=JSON.parse(localStorage.getItem(ARCH_KEY)||"null"); if(d&&Array.isArray(d.orders)) return {orders:d.orders, next:Math.max(1,+d.next||1)}; }catch(e){} return {orders:[], next:1}; }
   function saveArch(){ try{ localStorage.setItem(ARCH_KEY,JSON.stringify(ARCH)); return true; }catch(e){ archMsg("⚠ Браузърът не позволява запазване — свалете резервно копие.","bad"); return false; } }
-  function archMsg(m,k){ $("archStatus").className="status "+(k||""); $("archStatus").textContent=m; }
+  function archMsg(m,k){ const e=$("archStatus"); if(e){ e.className="status "+(k||""); e.textContent=m; } }
   function eur(v){ return v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €"; }
+  const orderSerial = n => "№ " + String(n).padStart(4,"0");
 
   // IndexedDB document store (one PDF per order id)
   const DB_NAME="mpr-admin", DB_STORE="docs";
@@ -831,8 +803,10 @@
     const id=(order.orderNo||"").trim() || orderKey();
     const priceIn=$("arch-price")?$("arch-price").value.trim():"";
     const P = PRICING || {};
+    const existing = ARCH.orders.find(o=>o.id===id);
+    const ser = existing && existing.serial ? existing.serial : ARCH.next++;  // пореден номер в админа
     const rec={
-      id, orderNo:(order.orderNo||"").trim(), savedAt:new Date().toISOString(), created:order.created||"",
+      id, serial:ser, orderNo:(order.orderNo||"").trim(), savedAt:new Date().toISOString(), created:order.created||"",
       name:($("o-name")?$("o-name").value:order.name||"").trim(), phone:($("o-phone")?$("o-phone").value:order.phone||"").trim(),
       price: priceIn!=="" ? +priceIn : null,                                   // продажна цена (ръчна)
       clientPrice: P.client!=null ? P.client : null,                          // цена за клиента (авто)
@@ -849,17 +823,16 @@
     }else{ const p=ARCH.orders.find(o=>o.id===id); if(p&&p.hasDoc){ rec.hasDoc=true; rec.docName=p.docName; } }
     const i=ARCH.orders.findIndex(o=>o.id===id);
     if(i>=0) ARCH.orders[i]=rec; else ARCH.orders.unshift(rec);
-    saveArch(); renderArchive();
-    archMsg("✓ Запазена в архива"+(rec.orderNo?" ("+rec.orderNo+")":"")+". "+(rec.hasDoc?"Документът е прикачен.":"Без документ."), "ok");
-    $("archiveCard").scrollIntoView({behavior:"smooth", block:"start"});
+    saveArch(); renderArchive(); renderProcessing();
+    const ps=$("procStatus"); if(ps){ ps.className="status ok"; ps.textContent="✓ Запазена в архива ("+orderSerial(rec.serial)+"). "+(rec.hasDoc?"Документът е прикачен.":"Без документ."); }
   }
   function openArchived(id){
     const o=ARCH.orders.find(x=>x.id===id); if(!o) return;
     order={ name:o.name, phone:o.phone, created:o.created, source:o.orderNo?("Архив: "+o.orderNo):"Архив",
       orderNo:o.orderNo, priceFromPdf:(o.price!=null?{total:o.price,currency:"€"}:null), doc:null,
       archive:{ price:o.price!=null?o.price:"", place:o.place, deliveryDate:o.deliveryDate }, tables:o.tables.map(normTable) };
-    setStatus("Заредена от архива: "+(o.orderNo||"поръчка")+". (Документът остава в архива — заредете PDF, за да го замените.)","ok");
-    renderOrder(); window.scrollTo({top:0,behavior:"smooth"});
+    setStatus("Заредена от архива: "+orderSerial(o.serial)+". (Документът остава в архива — заредете PDF, за да го замените.)","ok");
+    renderOrder(); showPage("work");
   }
   async function openDoc(id){
     try{ const d=await docGet(id); if(!d){ archMsg("Документът липсва на това устройство.","warn"); return; }
@@ -874,14 +847,14 @@
   function renderArchive(){
     const q=($("archSearch").value||"").toLowerCase().trim();
     let list=ARCH.orders.slice().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
-    if(q) list=list.filter(o=>((o.orderNo||"")+" "+(o.name||"")+" "+(o.phone||"")+" "+(o.place||"")).toLowerCase().includes(q));
+    if(q) list=list.filter(o=>((o.serial?orderSerial(o.serial):"")+" "+(o.orderNo||"")+" "+(o.name||"")+" "+(o.phone||"")+" "+(o.place||"")).toLowerCase().includes(q));
     $("archiveList").innerHTML = list.length
-      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Запазена</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Клиентска цена</th><th>Себестойност</th><th>Продажна</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
+      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Запазена</th><th>Маси</th><th>Клиентска цена</th><th>Себестойност</th><th>Продажна</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
         list.map(o=>'<tr>'+
-          '<td class="size">'+esc(o.orderNo||"—")+'</td>'+
-          '<td>'+esc(o.savedAt?new Date(o.savedAt).toLocaleDateString("bg-BG"):"")+'</td>'+
+          '<td class="size">'+esc(o.serial?orderSerial(o.serial):"—")+'</td>'+
           '<td>'+esc(o.name||"—")+'</td>'+
           '<td>'+esc(o.phone||"—")+'</td>'+
+          '<td>'+esc(o.savedAt?new Date(o.savedAt).toLocaleDateString("bg-BG"):"")+'</td>'+
           '<td class="q">'+o.tables.reduce((a,t)=>a+(t.qty||1),0)+'</td>'+
           '<td class="size">'+esc(eur(o.clientPrice))+'</td>'+
           '<td class="size">'+esc(eur(o.cost))+'</td>'+
@@ -901,7 +874,7 @@
   $("archSearch").addEventListener("input", renderArchive);
   $("archExport").addEventListener("click", async ()=>{
     archMsg("Подготвям копие с документите...","");
-    const out={ kind:"mpr-orders", v:1, saved:new Date().toISOString(), orders:[] };
+    const out={ kind:"mpr-orders", v:1, saved:new Date().toISOString(), next:ARCH.next, orders:[] };
     for(const o of ARCH.orders){ const rec=Object.assign({},o);
       if(o.hasDoc){ try{ const d=await docGet(o.id); if(d){ rec.doc=await blobToB64(d.blob); rec.docName=d.name; } }catch(e){} }
       out.orders.push(rec);
@@ -920,11 +893,73 @@
         if(o.doc){ try{ await docPut(o.id,b64ToBlob(o.doc,"application/pdf"),o.docName||o.id+".pdf"); o.hasDoc=true; }catch(e){} delete o.doc; }
         const i=ARCH.orders.findIndex(x=>x.id===o.id); if(i>=0) ARCH.orders[i]=o; else ARCH.orders.push(o); n++;
       }
+      const top=Math.max(0,...ARCH.orders.map(o=>+o.serial||0));
+      ARCH.next=Math.max(ARCH.next,+d.next||1,top+1);
       saveArch(); renderArchive(); archMsg("✓ Заредени "+n+" поръчки от копието (общо "+ARCH.orders.length+").","ok");
     }catch(e){ archMsg("✕ Файлът не е резервно копие на архива.","bad"); }
+  });
+
+  /* ---------- В обработка (delivery + sold price for the loaded order) ---------- */
+  function renderProcessing(){
+    const el=$("processing"); if(!el) return;
+    if(!order){ el.innerHTML='<div class="empty">Няма заредена поръчка. Заредете от страница „Разкрой“.</div>'; return; }
+    const aid=(order.orderNo||"").trim()||orderKey();
+    const prev=ARCH.orders.find(o=>o.id===aid);
+    const a=order.archive||{};
+    const pfPrice=(a.price!=null&&a.price!=="")?a.price:(prev?prev.price:"");
+    const pfPlace=(a.place!=null?a.place:(prev?prev.place:""))||"";
+    const pfDate =(a.deliveryDate!=null?a.deliveryDate:(prev?prev.deliveryDate:""))||"";
+    const P=PRICING||{};
+    const serTxt=prev?orderSerial(prev.serial):("ще получи "+orderSerial(ARCH.next));
+    const docNote=order.doc?("Документ за прикачане: "+esc(order.doc.name)):(prev&&prev.hasDoc?("Запазен документ: "+esc(prev.docName||"PDF")):"Без документ — заредете PDF на поръчката, за да се запази.");
+    el.innerHTML=
+      '<div class="muted"><b>'+esc(serTxt)+'</b> · '+esc(order.name||"—")+' · '+esc(order.phone||"—")+(order.orderNo?' · клиентски №: '+esc(order.orderNo):'')+'</div>'+
+      '<div class="pricebox procbox" style="margin-top:10px">'+
+        '<div class="big"><span>Цена за клиента</span><b>'+esc(eur2(P.client))+'</b></div>'+
+        '<div><span>Себестойност материали</span><b>'+esc(eur2(P.costMaterials))+'</b></div>'+
+        '<div><span>Заварки</span><b>'+esc(eur2(P.weld))+'</b></div>'+
+        '<div><span>Огъвания</span><b>'+esc(eur2(P.bend))+'</b></div>'+
+        '<div><span>Себестойност общо</span><b>'+esc(eur2(P.costTotal))+'</b></div>'+
+      '</div>'+
+      '<div class="grid" style="margin-top:12px">'+
+        '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'" placeholder="колко е продадена"></label>'+
+        '<label>Място на доставка<input type="text" id="arch-place" value="'+esc(pfPlace)+'" placeholder="адрес или обект"></label>'+
+        '<label>Дата на доставка<input type="date" id="arch-ddate" value="'+esc(pfDate)+'"></label>'+
+      '</div>'+
+      '<div class="row"><button class="btn primary" id="archSave" type="button">'+(prev?'Обнови в архива':'Запази в архива')+'</button></div>'+
+      '<div class="muted" style="margin-top:6px">'+docNote+'</div>'+
+      '<div class="status" id="procStatus"></div>';
+    $("arch-price").addEventListener("input", e=>{ (order.archive=order.archive||{}).price=e.target.value; });
+    $("arch-place").addEventListener("input", e=>{ (order.archive=order.archive||{}).place=e.target.value; });
+    $("arch-ddate").addEventListener("input", e=>{ (order.archive=order.archive||{}).deliveryDate=e.target.value; });
+    $("archSave").addEventListener("click", saveToArchive);
+  }
+
+  /* ---------- burger menu / pages ---------- */
+  const PAGES={ work:"Разкрой", processing:"В обработка", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
+  function closeMenu(){ $("menu").hidden=true; $("menubg").hidden=true; }
+  function showPage(name){
+    if(!PAGES[name]) name="work";
+    document.querySelectorAll(".page").forEach(s=>{ s.hidden = s.dataset.page!==name; });
+    $("pageName").textContent=PAGES[name];
+    document.querySelectorAll(".menuItem").forEach(b=>b.classList.toggle("active", b.dataset.go===name));
+    closeMenu();
+    if(name==="processing") renderProcessing();
+    if(name==="archive") renderArchive();
+    if(name==="stock") renderStock();
+    window.scrollTo({top:0});
+  }
+  $("burger").addEventListener("click", ()=>{ const open=!$("menu").hidden; if(open) closeMenu(); else { $("menu").hidden=false; $("menubg").hidden=false; } });
+  $("menubg").addEventListener("click", closeMenu);
+  document.querySelectorAll(".menuItem").forEach(b=>b.addEventListener("click", ()=>showPage(b.dataset.go)));
+
+  /* ---------- clear the loaded order ---------- */
+  $("clearOrder").addEventListener("click", ()=>{
+    order=null; renderOrder(); $("results").innerHTML=""; setStatus("",""); renderProcessing();
   });
 
   renderStock();
   renderArchive();
   buildSettings();
   renderOrder();
+  showPage("work");
