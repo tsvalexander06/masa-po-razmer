@@ -146,7 +146,7 @@
     const backZ=Math.min(d*0.45, Math.max(0, legBack/1000));
     const lxL=0.03, lxR=w-0.03-lg, frontZ=d-0.03-lg;
     const gw=PRICE.shelfGapW/2000;  // половината намаление на ширина от всяка страна
-    const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=lxL+gw, baseX1=lxR+lg-gw;  // долен плот: по-малък отзад+отпред и по ширина
+    const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=gw, baseX1=w-gw;  // долен плот: наравно с краката по ширина, по-малък отзад+shelfGap
     const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, st, baseZ1-baseZ0, B2,B2F,B2R);
 
     shapes.push({t:'shadow',pts:[P(-0.03,0,-0.03),P(w+0.03,0,-0.03),P(w+0.03,0,d+0.03),P(-0.03,0,d+0.03)]});
@@ -483,7 +483,7 @@
     const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
     const back = t.splashOn ? (+t.splashH||0) : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-2*P.legInset-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
+    const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }

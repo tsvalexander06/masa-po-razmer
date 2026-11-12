@@ -80,7 +80,7 @@
     const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
     const back = t.splashOn ? (+t.splashH||0) : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-2*P.legInset-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
+    const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }
@@ -270,8 +270,8 @@
     schemes.push({ title:"Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:t.L, plateD:t.D, E, R,
       backUp:!!t.splashOn, splashH:t.splashH, leg:0, blankW:topW, blankD:topD });
 
-    // долният плот: по-малък по ширина (странични отстъпи + shelfGapW) и по дълбочина (заден отстъп + shelfGap)
-    const shL = t.L - 2*I - S.shelfGapW, shD = t.D - t.legBack - S.shelfGap;
+    // долният плот идва наравно с краката: ширина само − shelfGapW; дълбочина − заден отстъп − shelfGap
+    const shL = t.L - S.shelfGapW, shD = t.D - t.legBack - S.shelfGap;
     const shelves = [];
     if(t.baseOn) shelves.push({ name:"Долна основа (плот)", short:"основа", at:t.baseH });
     if(t.midOn) shelves.push({ name:"Втори междинен плот", short:"междинен", at:mid2H(t) });
