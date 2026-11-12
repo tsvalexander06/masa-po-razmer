@@ -1,7 +1,21 @@
   const COMPANY_WHATSAPP = "359893457703";
   const $ = id => document.getElementById(id);
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const tables = [];
   let seq = 0;
+  let priceShown = false;
+
+  const CURRENCY = "лв.";
+  const fmtMoney = v => (Math.round(v*100)/100).toFixed(2) + " " + CURRENCY;
+  // readable, hard-to-collide order number: П-<date>-<4 chars>
+  function genOrderNo(){
+    const d=new Date(), p=n=>String(n).padStart(2,"0");
+    const ymd=""+d.getFullYear()+p(d.getMonth()+1)+p(d.getDate());
+    const A="ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; let r="";
+    const buf=(window.crypto&&crypto.getRandomValues)?crypto.getRandomValues(new Uint32Array(4)):null;
+    for(let i=0;i<4;i++) r+=A[(buf?buf[i]:Math.floor(Math.random()*4294967296))%A.length];
+    return "П-"+ymd+"-"+r;
+  }
 
   /* ---------- per-table template ---------- */
   const TPL = `
@@ -229,21 +243,53 @@
       t.specText = tableSpec(v, i+1);
     });
 
-    let s="";
+    let s="ПОРЪЧКА № "+orderNumber()+"\n══════════════\n";
     tables.forEach(t=>{ s += t.specText + "\n"; });
     s += "══════════════\n";
     s += "Брой маси: "+tables.length+"\n";
     const nm=$("name").value.trim(), ph=$("phone").value.trim();
     if(nm) s+="Име:     "+nm+"\n";
     if(ph) s+="Телефон: "+ph+"\n";
+    const o=buildOrder();
+    if(priceShown) s += "──────────────\n"+(o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване")+"\n";
     $("spec").textContent=s;
+    renderPrice(o);
+  }
+
+  function renderPrice(o){
+    const box=$("price");
+    if(!priceShown){ box.hidden=true; return; }
+    box.hidden=false;
+    const p=o&&o.price;
+    if(!p){
+      box.innerHTML='<div class="pmsg">Автоматичната цена ще бъде добавена скоро. Изпратете поръчката и ще се свържем с вас за потвърждение и цена.</div>';
+      return;
+    }
+    box.innerHTML='<div class="plabel">Ориентировъчна цена</div><div class="pbig">'+esc(fmtMoney(p.total))+'</div>'+
+      (p.lines&&p.lines.length?'<div class="plines">'+p.lines.map(l=>'<div><span>'+esc(l.label)+'</span><b>'+esc(fmtMoney(l.amount))+'</b></div>').join("")+'</div>':'')+
+      '<div class="pnote">Цената е ориентировъчна и се потвърждава от нас.</div>';
   }
 
   $("name").addEventListener("input", renderAll);
   $("phone").addEventListener("input", renderAll);
+  $("orderNo").addEventListener("input", renderAll);
+  $("calc").addEventListener("click", ()=>{ priceShown=true; renderAll(); $("price").scrollIntoView({behavior:"smooth", block:"nearest"}); });
   $("addTable").addEventListener("click", ()=>{
     const t = createTable();
     t.card.scrollIntoView({behavior:"smooth", block:"start"});
+  });
+
+  // new order — two-step confirm so an accidental tap doesn't wipe the form
+  let newArmed=false, newTimer=null;
+  function resetNewBtn(){ newArmed=false; $("newOrder").textContent="🆕 Нова поръчка"; }
+  $("newOrder").addEventListener("click", ()=>{
+    if(!newArmed){ newArmed=true; $("newOrder").textContent="⚠️ Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
+    clearTimeout(newTimer); resetNewBtn();
+    tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
+    seq=0; $("name").value=""; $("phone").value=""; $("orderNo").value=genOrderNo();
+    priceShown=false; $("price").hidden=true; pdfCache=null; $("ok").textContent="";
+    createTable();
+    window.scrollTo({top:0, behavior:"smooth"});
   });
 
   /* ---------- branded sheet per table ---------- */
@@ -263,7 +309,7 @@
     });
     return out;
   }
-  async function tableCanvas(t, label){
+  async function tableCanvas(t, label, meta){
     const svg=t.card.querySelector('.draw').cloneNode(true);
     svg.setAttribute("width","1060"); svg.setAttribute("height","795");
     const xml=new XMLSerializer().serializeToString(svg);
@@ -275,14 +321,17 @@
     mctx.font="28px 'Courier New',monospace";
     const specLines=wrapLines(mctx, t.specText.split("\n").filter(l=>l.trim()!==""), W-140);
     const specH = 50 + specLines.length*38;
-    const H = Math.max(1754, 180 + dh + 60 + specH + 110);
+    const H = Math.max(1754, 180 + dh + 60 + specH + 150);
     const C=document.createElement("canvas"); C.width=W; C.height=H;
     const x=C.getContext("2d");
     x.fillStyle="#ffffff"; x.fillRect(0,0,W,H);
     x.fillStyle="#1E6FF4"; x.fillRect(0,0,W,14);
     if(logoImg){ const lw=500, lh=lw*logoImg.height/logoImg.width; x.drawImage(logoImg,70,46,lw,lh); }
     else { x.fillStyle="#1552c7"; x.font="bold 46px Arial,sans-serif"; x.fillText("KONVEKTOMAT.STORE",70,96); }
-    if(label){ x.fillStyle="#1552c7"; x.font="bold 30px Arial,sans-serif"; x.textAlign="right"; x.fillText(label, W-70, 104); x.textAlign="left"; }
+    x.textAlign="right";
+    if(meta&&meta.orderNo){ x.fillStyle="#1552c7"; x.font="bold 26px Arial,sans-serif"; x.fillText("№ "+meta.orderNo, W-70, 92); }
+    if(label){ x.fillStyle="#64748b"; x.font="22px Arial,sans-serif"; x.fillText(label, W-70, 126); }
+    x.textAlign="left";
     x.fillStyle="#64748b"; x.font="26px Arial,sans-serif";
     x.fillText("Маса по поръчка — инокс",70,150);
     const dyimg=180;
@@ -299,14 +348,15 @@
     x.fillStyle="#15223a"; x.font="26px Arial,sans-serif";
     const nm=$("name").value.trim(), ph=$("phone").value.trim();
     x.fillText("Клиент: "+(nm||"—")+"     Телефон: "+(ph||"—"), 70, y);
+    if(meta&&meta.priceText){ y+=40; x.fillStyle="#1552c7"; x.font="bold 30px Arial,sans-serif"; x.fillText(meta.priceText, 70, y); }
     return C;
   }
 
-  async function allCanvases(){
+  async function allCanvases(meta){
     const out=[];
     for(let i=0;i<tables.length;i++){
       const label = tables.length>1 ? ("Маса "+(i+1)+" от "+tables.length) : "";
-      out.push(await tableCanvas(tables[i], label));
+      out.push(await tableCanvas(tables[i], label, meta));
     }
     return out;
   }
@@ -322,13 +372,11 @@
   }
 
   /* ---------- WhatsApp: send the PDF ---------- */
-  const PDF_NAME="poruchka-masi.pdf";
+  // ASCII-only filename (the readable order number stays inside the PDF)
+  function pdfName(){ const n=orderNumber().replace(/[^0-9A-Za-z]+/g,"-").replace(/^-+|-+$/g,""); return "poruchka-"+(n||"masi")+".pdf"; }
   let pdfCache=null; // the last PDF built, for this exact order
-  function waLink(){
-    const n=tables.length;
-    const txt="Здравейте! Изпращам поръчка за "+n+(n===1?" маса":" маси")+" (PDF прикачен).\n\n"+$("spec").textContent;
-    return "https://wa.me/"+COMPANY_WHATSAPP+"?text="+encodeURIComponent(txt);
-  }
+  // open the WhatsApp chat only — the PDF carries the order, no text message
+  function waLink(){ return "https://wa.me/"+COMPANY_WHATSAPP; }
   function canShareFile(file){
     try{ return !!(navigator.share && navigator.canShare && navigator.canShare({files:[file]})); }catch(e){ return false; }
   }
@@ -339,7 +387,7 @@
   }
   // computers (or where sharing files is blocked): save the PDF and open the WhatsApp chat
   async function downloadAndOpenChat(file){
-    await saveBlob(file,PDF_NAME);
+    await saveBlob(file,pdfName());
     const link=waLink();
     $("ok").innerHTML='PDF-ът е свален — прикачете го в чата: <a href="'+link+'" target="_blank" rel="noopener">отвори WhatsApp ›</a>';
     window.open(link,"_blank","noopener");
@@ -358,7 +406,7 @@
       }
       $("ok").textContent="Подготвям PDF...";
       const blob=await buildPdfBlob();
-      const file=new File([blob],PDF_NAME,{type:"application/pdf"});
+      const file=new File([blob],pdfName(),{type:"application/pdf"});
       pdfCache={key,file};
       if(canShareFile(file)){
         try{ await sharePdf(file); }
@@ -379,7 +427,9 @@
   /* ---------- PDF (one table per page) ---------- */
   async function buildPdfBlob(){
     const {jsPDF}=window.jspdf;
-    const cs=await allCanvases();
+    const o=buildOrder();
+    const meta={ orderNo:o.orderNo, priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване" };
+    const cs=await allCanvases(meta);
     const doc=new jsPDF({unit:"mm",format:"a4",orientation:"portrait",compress:true});
     const maxW=190, maxH=277;
     cs.forEach((canvas,i)=>{
@@ -391,28 +441,63 @@
       doc.addImage(img,"JPEG",offx,10,drawW,drawH,undefined,"FAST");
     });
     // machine-readable copy of the order for the admin cut-list app (admin/)
-    doc.setProperties({ title:"Order - konvektomat.store", subject:"Custom inox tables order", keywords:encodeOrder() });
+    doc.setProperties({ title:"Order "+o.orderNo+" - konvektomat.store", subject:"Custom inox tables order", keywords:await encodeOrder() });
     return doc.output("blob");
   }
 
-  /* ---------- order data embedded in the PDF ----------
-     Format "MPR1:<base64 of UTF-8 JSON>", stored in the PDF's Keywords field.
-     Read by admin/index.html — keep the two in step when changing fields. */
-  function orderData(){
-    renderAll();
-    return {
-      v:1, created:new Date().toISOString(),
-      name:$("name").value.trim(), phone:$("phone").value.trim(),
-      tables:tables.map(t=>{
-        const v=t.vals;
-        return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
-          splashOn:v.splashOn, splashH:v.splashH, legBack:v.legBack,
-          baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes };
-      })
-    };
+  /* ---------- order data ---------- */
+  function orderNumber(){ const el=$("orderNo"); if(!el.value.trim()) el.value=genOrderNo(); return el.value.trim(); }
+  function tablesSnapshot(){
+    return tables.map(t=>{
+      const v=t.vals;
+      return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
+        splashOn:v.splashOn, splashH:v.splashH, legBack:v.legBack,
+        baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes };
+    });
   }
-  function encodeOrder(){
-    const bytes=new TextEncoder().encode(JSON.stringify(orderData()));
+  // The whole order as data. Reads the current field values (does NOT call renderAll).
+  // Price is derived here, so it always matches the order.
+  function buildOrder(){
+    const o={ v:1, orderNo:orderNumber(), name:$("name").value.trim(), phone:$("phone").value.trim(), tables:tablesSnapshot() };
+    o.price=priceFor(o);
+    return o;
+  }
+
+  /* ===== ЦЕНА =====
+     Формулата за автоматичната цена ще бъде добавена по-късно.
+     Получава целия обект на поръчката (без цената) и трябва да върне:
+       { total:<число>, currency:"лв.", lines:[{label:"...", amount:<число>}, ...] }
+     или null, ако още няма формула. Смятайте от order.tables[i] (L, D, H, splashOn,
+     baseOn, midOn, legBack ...). Същата функция ще се сложи и в admin, за да се
+     преизчислява цената и клиент да не може да я подмени. */
+  function priceFor(order){
+    return null; // TODO: реална формула (идва по-късно)
+  }
+
+  /* Tamper-evidence signature over the order (HMAC-SHA256).
+     ВАЖНО: ключът е в кода на страницата, затова това доказва промяна, но не е
+     абсолютна защита. Истинската защита е admin да преизчисли цената от размерите
+     и да сравни с подписа — подменена цена просто се игнорира. */
+  const ORDER_SECRET = "kv-mpr-sign-2026-v1";
+  function canonicalOrder(d){
+    return JSON.stringify({ v:d.v, orderNo:d.orderNo, name:d.name, phone:d.phone, created:d.created, tables:d.tables, price:d.price });
+  }
+  async function signOrder(d){
+    try{
+      if(!(window.crypto&&crypto.subtle)) return "";
+      const enc=new TextEncoder();
+      const key=await crypto.subtle.importKey("raw", enc.encode(ORDER_SECRET), {name:"HMAC",hash:"SHA-256"}, false, ["sign"]);
+      const mac=await crypto.subtle.sign("HMAC", key, enc.encode(canonicalOrder(d)));
+      return [...new Uint8Array(mac)].map(b=>b.toString(16).padStart(2,"0")).join("");
+    }catch(e){ return ""; }
+  }
+  // "MPR1:<base64 of UTF-8 JSON>" in the PDF Keywords. Read by admin/index.html.
+  // Includes orderNo, price and a signature — keep in step with admin.
+  async function encodeOrder(){
+    const d=buildOrder();
+    d.created=new Date().toISOString();
+    d.sig=await signOrder(d);
+    const bytes=new TextEncoder().encode(JSON.stringify(d));
     let bin=""; bytes.forEach(b=>bin+=String.fromCharCode(b));
     return "MPR1:"+btoa(bin);
   }
@@ -422,11 +507,11 @@
       const blob=await buildPdfBlob();
       const dl=(window.claude&&claude.use)?await claude.use("downloads"):null;
       if(dl){
-        try{ await dl.save({filename:"masi-chertej.pdf",data:blob}); $("ok").textContent="✓ PDF-ът е готов"; }
+        try{ await dl.save({filename:pdfName(),data:blob}); $("ok").textContent="✓ PDF-ът е готов"; }
         catch(e){ $("ok").textContent=(e&&e.code==="declined")?"Свалянето е отказано.":"PDF неуспешен тук — работи на сайта."; }
       }else{
         const url=URL.createObjectURL(blob);
-        const a=document.createElement("a"); a.href=url; a.download="masi-chertej.pdf";
+        const a=document.createElement("a"); a.href=url; a.download=pdfName();
         document.body.appendChild(a); a.click(); a.remove();
         setTimeout(()=>URL.revokeObjectURL(url),1500);
         $("ok").textContent="✓ PDF-ът се сваля";
@@ -436,4 +521,5 @@
   });
 
   /* ---------- init ---------- */
+  $("orderNo").value = genOrderNo();
   createTable();
