@@ -145,7 +145,7 @@
 
     const backZ=Math.min(d*0.45, Math.max(0, legBack/1000));
     const lxL=0.03, lxR=w-0.03-lg, frontZ=d-0.03-lg;
-    const baseZ0=backZ, baseZ1=d, baseX0=lxL, baseX1=lxR+lg;  // долен плот: наравно отпред, по-малък само отзад
+    const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=lxL, baseX1=lxR+lg;  // долен плот: по-малък отзад + shelfGap отпред
     const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, st, baseZ1-baseZ0, B2,B2F,B2R);
 
     shapes.push({t:'shadow',pts:[P(-0.03,0,-0.03),P(w+0.03,0,-0.03),P(w+0.03,0,d+0.03),P(-0.03,0,d+0.03)]});
@@ -474,7 +474,7 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 0,       // надценка % — ЗАДАЙ стойността (сега 0 = без надценка)
-    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, thickness:1.5
+    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
@@ -482,7 +482,7 @@
     const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
     const back = t.splashOn ? (+t.splashH||0) : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-2*P.legInset, shD=t.D-(+t.legBack||0);
+    const shL=t.L-2*P.legInset, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }
