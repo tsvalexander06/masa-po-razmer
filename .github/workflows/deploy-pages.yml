@@ -39,7 +39,9 @@ jobs:
           V="${GITHUB_SHA::8}"
           sed -i "s#src=\"app.js\"#src=\"app.js?v=$V\"#; s#vendor/jspdf-2.5.1.umd.min.js#vendor/jspdf-2.5.1.umd.min.js?v=$V#" site/index.html
           sed -i "s#src=\"admin.js\"#src=\"admin.js?v=$V\"#; s#src=\"gate.js\"#src=\"gate.js?v=$V\"#" site/admin/index.html
-          echo "Versioned assets with v=$V"
+          D="$(date -u +%Y-%m-%d\ %H:%M)"
+          find site -name '*.html' -print0 | xargs -0 sed -i "s/__BUILD__/$V · $D UTC/g"
+          echo "Versioned assets and build stamp with v=$V"
 
       - name: Upload site as Pages artifact
         uses: actions/upload-pages-artifact@v3
