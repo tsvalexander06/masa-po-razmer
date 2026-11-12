@@ -49,8 +49,11 @@
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
   .btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:11px;
     font-size:16px;font-weight:700;border:none;cursor:pointer;text-decoration:none;color:#fff}
-  .btn-wa{background:var(--brand)} .btn-pdf{background:var(--brand)} .btn-calc{background:var(--brand)}
+  .btn-wa{background:var(--brand)} .btn-pdf{background:var(--brand)}
+  .btn-calc{background:var(--brand-dark)}
   .btn-new{background:#fff;color:var(--brand);border:2px solid var(--brand)}
+  .toprow{display:flex;gap:10px;margin-bottom:16px}
+  .toprow .btn{flex:1 1 0;min-width:0}
   .btn:active{transform:translateY(1px)}
   .price{margin-top:12px;background:#eef5ff;border:1px solid #c7d8f2;border-radius:12px;padding:14px;text-align:center}
   .price .plabel{font-size:13px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.4px}
@@ -73,7 +76,13 @@
   <!-- tables are injected here -->
   <div id="tables"></div>
 
-  <button class="addBtn" id="addTable" type="button">➕ Добави друга маса</button>
+  <button class="addBtn" id="addTable" type="button">Добави друга маса</button>
+
+  <div class="toprow">
+    <button class="btn btn-calc" id="calc" type="button">Калкулирай цена</button>
+    <button class="btn btn-new" id="newOrder" type="button">Нова поръчка</button>
+  </div>
+  <div class="price" id="price" hidden></div>
 
   <!-- shared contact -->
   <div class="card">
@@ -90,12 +99,9 @@
   <div class="card">
     <h2>Вашата поръчка</h2>
     <div class="spec" id="spec"></div>
-    <div class="price" id="price" hidden></div>
     <div class="btns">
-      <button class="btn btn-calc" id="calc" type="button">🧮 Калкулирай цена</button>
-      <button class="btn btn-wa" id="wa" type="button">📲 Изпрати PDF по WhatsApp</button>
-      <button class="btn btn-pdf" id="pdf" type="button">⬇️ Свали като PDF</button>
-      <button class="btn btn-new" id="newOrder" type="button">🆕 Нова поръчка</button>
+      <button class="btn btn-wa" id="wa" type="button">Изпрати PDF по WhatsApp</button>
+      <button class="btn btn-pdf" id="pdf" type="button">Свали като PDF</button>
     </div>
     <div class="ok" id="ok"></div>
     <p class="hint" style="text-align:center;margin-top:8px">След изпращане ние ще се свържем с вас за потвърждение и цена.</p>

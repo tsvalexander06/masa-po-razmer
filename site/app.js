@@ -5,7 +5,7 @@
   let seq = 0;
   let priceShown = false;
 
-  const CURRENCY = "лв.";
+  const CURRENCY = "€";
   const fmtMoney = v => (Math.round(v*100)/100).toFixed(2) + " " + CURRENCY;
   // readable, hard-to-collide order number: П-<date>-<4 chars>
   function genOrderNo(){
@@ -251,7 +251,6 @@
     if(nm) s+="Име:     "+nm+"\n";
     if(ph) s+="Телефон: "+ph+"\n";
     const o=buildOrder();
-    if(priceShown) s += "──────────────\n"+(o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване")+"\n";
     $("spec").textContent=s;
     renderPrice(o);
   }
@@ -281,9 +280,9 @@
 
   // new order — two-step confirm so an accidental tap doesn't wipe the form
   let newArmed=false, newTimer=null;
-  function resetNewBtn(){ newArmed=false; $("newOrder").textContent="🆕 Нова поръчка"; }
+  function resetNewBtn(){ newArmed=false; $("newOrder").textContent="Нова поръчка"; }
   $("newOrder").addEventListener("click", ()=>{
-    if(!newArmed){ newArmed=true; $("newOrder").textContent="⚠️ Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
+    if(!newArmed){ newArmed=true; $("newOrder").textContent="Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
     clearTimeout(newTimer); resetNewBtn();
     tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
     seq=0; $("name").value=""; $("phone").value=""; $("orderNo").value=genOrderNo();
