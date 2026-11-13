@@ -3,7 +3,7 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const DEFAULTS = { topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, feet:0, bendDed:0, tubeWall:1.5,
+  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:10, shelfGapW:20, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -14,7 +14,9 @@
     ["shelfGap","Долен плот — намаление дълбочина","мм (за влизане между краката / заварка)"],
     ["shelfGapW","Долен плот — намаление ширина","мм, общо (за влизане между краката / заварка)"],
     ["feet","Регулируеми крачета","мм височина; 0 = без"],
-    ["bendDed","Корекция за огъване","мм на всяко огъване (изважда се от заготовката)"],
+    ["stretch","Удължение на перото при огъване","мм — перото излиза с толкова по-дълго (в заготовката: перо − това)"],
+    ["topCut","Работен плот — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
+    ["shelfCut","Долни плотове — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["tubeWall","Стена на тръбата","мм, за теглото"],
     ["tubeStock","Дължина на прът тръба","мм"],
     ["kerf","Загуба при рязане","мм на рез"],
@@ -35,6 +37,13 @@
     catch(e){ s = Object.assign({}, DEFAULTS); }
     // a 0 material price means it was never set on this device — use the real defaults
     ["sheetPrice","sheet2Price","tubePrice"].forEach(k => { if(!(+s[k] > 0)) s[k] = DEFAULTS[k]; });
+    // v2: returns 10 → 12 мм, blanks smaller by 8 (top) / 16 (shelves) — replaces the old per-bend correction
+    if(!(+s.v >= 2)){
+      if(+s.topReturn === 10) s.topReturn = DEFAULTS.topReturn;
+      if(+s.shelfReturn === 10) s.shelfReturn = DEFAULTS.shelfReturn;
+      delete s.bendDed; s.v = 2;
+      try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
+    }
     return s;
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
@@ -72,13 +81,13 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
-    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
+    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   function pBlankM2(t){
-    const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
-    const back = t.splashOn ? (+t.splashH||0) : ft;
+    const P=PRICE, ft=P.topEdge+P.topReturn-P.stretch-P.topCut/2, fs=P.shelfEdge+P.shelfReturn-P.stretch-P.shelfCut/2;
+    const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
     const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
@@ -432,23 +441,24 @@
      Legs: 30×30 tube, welded straight to the folded edges of the top and shelves — no frame rails (царги). */
   function computeTable(t, idx){
     const s = t.legProfile || 30, th = t.thickness || 1.5;
-    const E = S.topEdge, R = S.topReturn, F = S.shelfEdge, Rs = S.shelfReturn, I = S.legInset, B = S.bendDed;
+    const E = S.topEdge, R = S.topReturn, F = S.shelfEdge, Rs = S.shelfReturn, I = S.legInset, cT = S.topCut / 2, cS = S.shelfCut / 2, st = S.stretch;
     const tag = "М" + (idx + 1);
     const rows = [], sheets = [], tubes = [], warns = [], schemes = [];
     const sheetMat = "Лист инокс " + th + " мм", tubeMat = "Тръба " + s + "×" + s;
-    // flat width of a double-folded edge: board + return, two bends
-    const flange = (e, r) => e + r - (r > 0 ? 2 : 1) * B;
+    // flat width of a folded edge in the blank: board + return (the return comes out longer by `st` when bent),
+    // minus half the blank reduction (the reduction is split over both sides)
+    const flange = (e, r, c) => e + (r > 0 ? r - st : 0) - c;
     const profTxt = (e, r) => "челна дъска " + e + " мм надолу" + (r > 0 ? " + " + r + " мм навътре" : "");
 
-    const fTop = flange(E, R);
-    const back = t.splashOn ? t.splashH - B : fTop;
+    const fTop = flange(E, R, cT);
+    const back = t.splashOn ? t.splashH - cT : fTop;
     const topW = t.L + 2*fTop, topD = t.D + fTop + back;
     rows.push({ kind:"sheet", part:"Работен плот" + (t.splashOn ? " с борд" : ""), mat:sheetMat, size:fmt(topW)+" × "+fmt(topD), qty:1,
       note:"Готов: "+t.L+" × "+t.D+" мм. Отпред и отстрани: "+profTxt(E, R)+"; отзад: "+(t.splashOn ? "борд "+t.splashH+" мм нагоре" : "същото")+
            ". Изрези в ъглите: отпред "+fmt(fTop)+"×"+fmt(fTop)+", отзад "+fmt(fTop)+"×"+fmt(back)+" мм. Виж схемата." });
     sheets.push({ label:tag+" плот", w:topW, h:topD });
     schemes.push({ title:"Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:t.L, plateD:t.D, E, R,
-      backUp:!!t.splashOn, splashH:t.splashH, leg:0, blankW:topW, blankD:topD });
+      backUp:!!t.splashOn, splashH:t.splashH, leg:0, blankW:topW, blankD:topD, cut:S.topCut });
 
     // долният плот идва наравно с краката: ширина само − shelfGapW; дълбочина − заден отстъп − shelfGap
     const shL = t.L - S.shelfGapW, shD = t.D - t.legBack - S.shelfGap;
@@ -456,7 +466,7 @@
     if(t.baseOn) shelves.push({ name:"Долна основа (плот)", short:"основа", at:t.baseH });
     if(t.midOn) shelves.push({ name:"Втори междинен плот", short:"междинен", at:mid2H(t) });
     if(t.midOn && !t.baseOn) warns.push("Втори междинен плот без долна основа — височината му е сметната спрямо полето за основата.");
-    const fSh = flange(F, Rs), shW = shL + 2*fSh, shDd = shD + 2*fSh;
+    const fSh = flange(F, Rs, cS), shW = shL + 2*fSh, shDd = shD + 2*fSh;
     shelves.forEach(sh => {
       rows.push({ kind:"sheet", part:sh.name, mat:sheetMat, size:fmt(shW)+" × "+fmt(shDd), qty:1,
         note:"Готов: "+fmt(shL)+" × "+fmt(shD)+" мм. От 4-те страни: "+profTxt(F, Rs)+". Изрези в ъглите "+fmt(fSh+s)+"×"+fmt(fSh+s)+
@@ -464,7 +474,7 @@
       sheets.push({ label:tag+" "+sh.short, w:shW, h:shDd });
     });
     if(shelves.length) schemes.push({ title:shelves.map(x => x.name).join(" и "), qty:shelves.length, plateL:shL, plateD:shD,
-      E:F, R:Rs, backUp:false, leg:s, blankW:shW, blankD:shDd });
+      E:F, R:Rs, backUp:false, leg:s, blankW:shW, blankD:shDd, cut:S.shelfCut });
 
     const leg = t.H - th - S.feet;
     const welded = ["работния плот"].concat(shelves.map(sh => sh.short === "основа" ? "долната основа" : "втория междинен плот")).join(", ");
@@ -563,7 +573,9 @@
     leg.forEach((l, i) => { const lx = 20 + i * 250; g += ln(lx, LY, lx + 34, LY, l[0]) + t(lx + 42, LY + 4, l[1], 'font-size="12" fill="#334155"'); });
     const VW = Math.max(PX + 260, 20 + leg.length * 250), VH = LY + 16;
     return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">' + g + '</svg>' +
-      '<figcaption>' + esc(sc.title) + (sc.qty > 1 ? ' — ' + sc.qty + ' бр. еднакви' : '') + ' · заготовка ' + fmt(sc.blankW) + ' × ' + fmt(sc.blankD) + ' мм · огъванията са в пропорция, плотът не е в мащаб</figcaption></figure>';
+      '<figcaption>' + esc(sc.title) + (sc.qty > 1 ? ' — ' + sc.qty + ' бр. еднакви' : '') + ' · заготовка ' + fmt(sc.blankW) + ' × ' + fmt(sc.blankD) + ' мм' +
+      (sc.cut ? ' (размерите по веригата са външни, след огъване; заготовката е намалена с ' + fmt(sc.cut) + ' мм заради огъванията)' : '') +
+      ' · огъванията са в пропорция, плотът не е в мащаб</figcaption></figure>';
   }
 
   /* ---------- nesting rectangles on sheets (MaxRects, best short side fit, rotation allowed) ---------- */

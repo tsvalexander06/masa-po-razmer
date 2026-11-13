@@ -472,13 +472,13 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
-    topEdge:30, topReturn:10, shelfEdge:20, shelfReturn:10, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
+    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   function pBlankM2(t){
-    const P=PRICE, ft=P.topEdge+P.topReturn, fs=P.shelfEdge+P.shelfReturn;
-    const back = t.splashOn ? (+t.splashH||0) : ft;
+    const P=PRICE, ft=P.topEdge+P.topReturn-P.stretch-P.topCut/2, fs=P.shelfEdge+P.shelfReturn-P.stretch-P.shelfCut/2;
+    const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
     const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
