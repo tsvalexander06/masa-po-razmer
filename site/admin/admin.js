@@ -92,6 +92,7 @@
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
+    capEach: 3,         // € за тапичка на крак (4 на маса) — добавя се към цената, без надценка
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
@@ -109,12 +110,13 @@
   function priceParts(t){
     const mat=pBlankM2(t)*PRICE.sheetM2, tube=pTubeM(t)*PRICE.tubeM,
           weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
-    return { mat, tube, weld, bend, base:mat+tube+weld+bend };
+    const caps=4*PRICE.capEach;   // тапички на краката — към цената, без надценка
+    return { mat, tube, weld, bend, caps, base:mat+tube+weld+bend };
   }
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, per=priceParts(t).base*m;
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=pp.base*m+pp.caps;
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     return { total, currency:"€", lines };
   }
@@ -921,9 +923,10 @@
     let weldOurs = 0, bendOurs = 0;
     o.tables.forEach(t => { const p = priceParts(t); weldOurs += p.weld * t.qty; bendOurs += p.bend * t.qty; });
     const costMaterials = sheetCostOurs + tubeCostOurs;
-    const costTotal = costMaterials + weldOurs + bendOurs;
+    const capsOurs = o.tables.reduce((a, t) => a + priceParts(t).caps * t.qty, 0);   // тапички на краката
+    const costTotal = costMaterials + weldOurs + bendOurs + capsOurs;
     const client = priceFor({ tables:o.tables });
-    PRICING = { client:client ? client.total : 0, costMaterials, weld:weldOurs, bend:bendOurs, costTotal };
+    PRICING = { client:client ? client.total : 0, costMaterials, weld:weldOurs, bend:bendOurs, caps:capsOurs, costTotal };
 
     // head: who and what
     const cr = fmtDT(o.created);
@@ -1121,6 +1124,7 @@
         '<div><span>Себестойност материали</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
         '<div><span>Заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
         '<div><span>Огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
+        '<div><span>Тапички на краката</span><b>' + esc(eur2(P.caps)) + '</b></div>' +
         '<div><span>Себестойност общо</span><b>' + esc(eur2(P.costTotal)) + '</b></div>' +
         '<div><span>Разлика (цена − себестойност)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
       '</div>';
