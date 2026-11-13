@@ -55,6 +55,16 @@
     <div class="sub f-splashBox">
       <label>Височина на борда <span class="hint">(мм)</span></label>
       <input type="number" class="f-splashH" value="100" min="20" max="300" step="10">
+      <label>Подгъвка горе на борда</label>
+      <div class="row">
+        <div><span class="hint">Посока</span><select class="f-hemDir">
+          <option value="wall" selected>Към стената</option>
+          <option value="front">Напред (към плота)</option>
+          <option value="none">Без подгъвка</option>
+        </select></div>
+        <div class="f-hemSizeBox"><span class="hint">Размер (мм, 10–60)</span><input type="number" class="f-hem" value="20" min="10" max="60" step="1"></div>
+      </div>
+      <p class="info f-hemInfo"></p>
     </div>
 
     <div class="f-legBackBox">
@@ -142,6 +152,7 @@
     const v = {
       L:+q('.f-L').value||0, D:+q('.f-D').value||0, H,
       splashOn:q('.f-splashOn').checked, splashH:+q('.f-splashH').value||0,
+      hemDir:q('.f-hemDir').value, hem:q('.f-hemDir').value==="none" ? 0 : Math.min(60, Math.max(10, Math.round(+q('.f-hem').value||20))),
       legBack:Math.max(12, +q('.f-legBack').value||0),   // минимум 12 мм (зад перото 12 мм)
       baseOn:q('.f-baseOn').checked, baseH,
       midOn:q('.f-midOn').checked, mid2H,
@@ -163,7 +174,7 @@
       const g0 = tableGeo(v, PRICE);                       // with the standard leg positions
       v.legBack = Math.max(g0.minBack, v.legBack);         // back legs stay behind the top's return
       const auto = tableGeo(v, PRICE);
-      const maxSpan = v.D - auto.front - auto.minBack, sp = n('.f-legSpan');
+      const maxSpan = auto.Dp - auto.front - auto.minBack, sp = n('.f-legSpan');
       if(sp) v.legSpan = Math.round(Math.min(maxSpan, Math.max(100, sp)) * 10) / 10;
       LEG_KEYS.forEach(k => { const x = n('.f-' + k);
         if(x) v[k] = Math.round(Math.min(auto.legAuto, Math.max(50, x)) * 10) / 10;
@@ -189,7 +200,9 @@
      - краката стоят зад сгъвката на работния плот: по-дълга сгъвка ги мести навътре (отпред и отстрани);
      - долните плотове са между краката: очертанието им = външните страни на краката;
      - разстояние предни–задни крака = външно = дълбочината на долните плотове; задава мястото на задните крака;
-     - всеки крак може да е по-къс (стъпва на подложка) — плотът остава хоризонтален. */
+     - всеки крак може да е по-къс (стъпва на подложка) — плотът остава хоризонтален;
+     - борд: подгъвка горе към стената / напред / без; към стената тя е част от общата дълбочина D,
+       т.е. плотът е D − подгъвката (стари поръчки без посока: към стената, но извън D). */
   const LEG_KEYS = ["legFL","legFR","legBL","legBR"];
   const LEG_NAMES = ["преден ляв","преден десен","заден ляв","заден десен"];
   function tableGeo(t, D){
@@ -198,16 +211,20 @@
     const eB = num(t.baseEdge) || num(t.shelfEdge) || D.shelfEdge;
     const eM = num(t.midEdge) || num(t.shelfEdge) || D.shelfEdge;
     const rT = num(t.topRet) || D.topReturn, rB = num(t.baseRet) || D.shelfReturn, rM = num(t.midRet) || D.shelfReturn;
+    const hemDir = t.splashOn ? (t.hemDir === "wall" || t.hemDir === "front" || t.hemDir === "none" ? t.hemDir : "legacy") : "none";
+    const hem = hemDir === "none" ? 0 : (num(t.hem) || +D.splashHem || 0);
+    const hemIn = hemDir === "wall" ? hem : 0;           // влиза в общата дълбочина
+    const Dp = (+t.D || 0) - hemIn;                      // дълбочина на самия плот
     const dR = rT - D.topReturn;                       // по-дълга сгъвка на плота → краката навътре
     const front = D.shelfGap + dR;                     // предна страна на предните крака от предния ръб
     const side = (D.shelfGapW + 2 * dR) / 2;           // външна страна на краката от страничния ръб
     const minBack = t.splashOn ? 0 : rT;               // без борд: зад сгъвката; с борд задът е свободен
     let back = t.splashOn ? 0 : Math.max(minBack, +t.legBack || 0);
-    let span = (+t.D || 0) - front - back;
-    if(num(t.legSpan)){ span = num(t.legSpan); back = (+t.D || 0) - front - span; }
+    let span = Dp - front - back;
+    if(num(t.legSpan)){ span = num(t.legSpan); back = Dp - front - span; }
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
     const legs = LEG_KEYS.map(k => num(t[k]) || legAuto);
-    return { eT, eB, eM, rT, rB, rM, front, side, back, minBack, span, shL:(+t.L || 0) - 2 * side, shD:span, legAuto, legs };
+    return { eT, eB, eM, rT, rB, rM, hemDir, hem, hemIn, Dp, front, side, back, minBack, span, shL:(+t.L || 0) - 2 * side, shD:span, legAuto, legs };
   }
 
   /* ---------- isometric 3D drawing (same in the customer form and the admin) ---------- */
@@ -218,7 +235,7 @@
     const splashOn=v.splashOn, splashH=v.splashH, baseOn=v.baseOn, baseH=v.baseH, midOn=v.midOn;
     const legProfile=v.legProfile||30;
 
-    const w=realL/1000, d=realD/1000, h=realH/1000;
+    const w=realL/1000, d=g.Dp/1000, h=realH/1000, zD=-g.hemIn/1000;   // zD: задният край на общата дълбочина
     const tt=Math.max(0.015,(g.eT+10)/1000), lg=legProfile/1000, st=0.03;
     const thB=Math.max(0.012,(g.eB+10)/1000), thM=Math.max(0.012,(g.eM+10)/1000);
     const legH=h-tt;
@@ -257,9 +274,10 @@
 
     leg(0,lxL,frontZ); leg(1,lxR,frontZ);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
-    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=(+D.splashHem||0)/1000;
-      if(hm>0) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
-      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, toFront=g.hemDir==="front";
+      if(hm>0 && !toFront) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
+      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT);
+      if(hm>0 && toFront) box(0,h+bs-0.006,st,w,0.006,hm,TOP,FRONT,RIGHT); }    // подгъвка горе, напред
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
@@ -269,8 +287,8 @@
     }
     dim(P(0,0,d+off),P(w,0,d+off),P(w/2,0,d+off),realL+'','middle',0,16,
         [[P(0,0,d),P(0,0,d+off)],[P(w,0,d),P(w,0,d+off)]]);
-    dim(P(w+off,0,0),P(w+off,0,d),P(w+off,0,d/2),realD+'','start',8,4,
-        [[P(w,0,0),P(w+off,0,0)],[P(w,0,d),P(w+off,0,d)]]);
+    dim(P(w+off,0,zD),P(w+off,0,d),P(w+off,0,(zD+d)/2),realD+'','start',8,4,
+        [[P(w,0,zD),P(w+off,0,zD)],[P(w,0,d),P(w+off,0,d)]]);
     dim(P(w+off,0,d),P(w+off,h,d),P(w+off,h/2,d),realH+'','start',8,0,
         [[P(w,h,d),P(w+off,h,d)]]);
     if(g.back>0.5){ const sx=w+off*1.9;
@@ -323,6 +341,8 @@
     s+="Дебелина ламарина: 1.5 мм\n";
     s+="Профил крак: 30 × 30 мм\n";
     s+="Борд:       "+(v.splashOn?"ДА ("+v.splashH+" мм)":"НЕ")+"\n";
+    if(v.splashOn) s+="Подгъвка на борда: "+(v.hemDir==="wall" ? v.hem+" мм към стената (включена в дълбочината "+v.D+" мм; плот "+(v.D-v.hem)+" мм)"
+                                          : v.hemDir==="front" ? v.hem+" мм напред" : "НЕ")+"\n";
     if(!v.splashOn) s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
     s+="Долна основа (плот): "+(v.baseOn?"ДА (на "+v.baseH+" мм от пода)":"НЕ")+"\n";
     s+="Втори междинен плот: "+(v.midOn?"ДА (по средата между основата и работния плот, ≈ "+v.mid2H+" мм от пода)":"НЕ")+"\n";
@@ -341,7 +361,7 @@
     const g = tableGeo(v, PRICE), auto = tableGeo(Object.assign({}, v, { legSpan:0 }), PRICE);
     q('.f-legSpan').placeholder = "стандартно " + Math.round(auto.span * 10) / 10;
     q('.f-spanInfo').textContent = v.legSpan
-      ? "Задните крака ще са на " + Math.round(g.back * 10) / 10 + " мм от задния ръб" + (v.splashOn ? " (борд)" : "") + "; долните плотове ще са дълбоки " + v.legSpan + " мм. Най-много " + Math.round((v.D - g.front - g.minBack) * 10) / 10 + " мм."
+      ? "Задните крака ще са на " + Math.round(g.back * 10) / 10 + " мм от задния ръб" + (v.splashOn ? " (борд)" : "") + "; долните плотове ще са дълбоки " + v.legSpan + " мм. Най-много " + Math.round((g.Dp - g.front - g.minBack) * 10) / 10 + " мм."
       : "";
     LEG_KEYS.forEach(k => q('.f-' + k).placeholder = String(g.legAuto));
     const raised = LEG_KEYS.map((k, i) => v[k] ? LEG_NAMES[i] + ": " + v[k] + " мм — стъпва на " + Math.round((g.legAuto - v[k]) * 10) / 10 + " мм" : "").filter(Boolean);
@@ -356,6 +376,12 @@
       const v = readTable(t);
       t.vals = v;
       t.card.querySelector('.f-splashBox').style.display = v.splashOn?"block":"none";
+      t.card.querySelector('.f-hemSizeBox').style.visibility = v.hemDir==="none" ? "hidden" : "visible";
+      { const g = tableGeo(v, PRICE);
+        t.card.querySelector('.f-hemInfo').textContent = v.hemDir==="wall"
+          ? "Общата дълбочина "+v.D+" мм е до стената и включва подгъвката: плот "+g.Dp+" мм + подгъвка "+v.hem+" мм."
+          : v.hemDir==="front" ? "Подгъвката "+v.hem+" мм е напред, над плота — дълбочината на плота е "+v.D+" мм."
+          : "Без подгъвка — дълбочината на плота е "+v.D+" мм."; }
       t.card.querySelector('.f-legBackBox').style.display = (v.splashOn || v.legSpan) ? "none" : "block";
       renderAdvanced(t, v);
       t.card.querySelector('.f-baseBox').style.display = v.baseOn?"block":"none";
@@ -568,7 +594,7 @@
     return tables.map(t=>{
       const v=t.vals;
       return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
-        splashOn:v.splashOn, splashH:v.splashH, legBack:v.legBack,
+        splashOn:v.splashOn, splashH:v.splashH, hemDir:v.hemDir, hem:v.hem, legBack:v.legBack,
         baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes,
         advOn:v.advOn, topEdge:v.topEdge, baseEdge:v.baseEdge, midEdge:v.midEdge, topRet:v.topRet, baseRet:v.baseRet, midRet:v.midRet,
         legSpan:v.legSpan, legFL:v.legFL, legFR:v.legFR, legBL:v.legBL, legBR:v.legBR };
@@ -597,12 +623,12 @@
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
-  const pBends  = t => (6 + (t.splashOn?(PRICE.splashHem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  const pBends  = t => (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   function pBlankM2(t){
     const P=PRICE, g=tableGeo(t,P), cT=P.topCut/2, cS=P.shelfCut/2;
     const ft=g.eT+g.rT-P.stretch-cT;
-    const back = t.splashOn ? (+t.splashH||0)+P.splashHem-cT : ft;
-    const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
+    const back = t.splashOn ? (+t.splashH||0)+g.hem-cT : ft;
+    const topW=(t.L+2*ft)/1000, topD=(g.Dp+ft+back)/1000;
     const shelf=(e,r)=>{ const f=e+r-P.stretch-cS; return (g.shL>0&&g.shD>0)?((g.shL+2*f)/1000)*((g.shD+2*f)/1000):0; };
     return Math.max(0,topW*topD) + (t.baseOn?shelf(g.eB,g.rB):0) + (t.midOn?shelf(g.eM,g.rM):0);
   }
