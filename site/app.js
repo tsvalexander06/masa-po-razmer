@@ -4,6 +4,7 @@
   const tables = [];
   let seq = 0;
   let priceShown = false;
+  let ORDER_NO = "";  // авто номер — вижда се само като име на PDF файла и скрито за админа
 
   const CURRENCY = "€";
   const fmtMoney = v => (Math.round(v*100)/100).toFixed(2) + " " + CURRENCY;
@@ -244,7 +245,7 @@
       t.specText = tableSpec(v, i+1);
     });
 
-    let s="ПОРЪЧКА № "+orderNumber()+"\n══════════════\n";
+    let s="";
     tables.forEach(t=>{ s += t.specText + "\n"; });
     s += "══════════════\n";
     s += "Брой маси: "+tables.length+"\n";
@@ -272,7 +273,6 @@
 
   $("name").addEventListener("input", renderAll);
   $("phone").addEventListener("input", renderAll);
-  $("orderNo").addEventListener("input", renderAll);
   $("calc").addEventListener("click", ()=>{ priceShown=true; renderAll(); $("price").scrollIntoView({behavior:"smooth", block:"nearest"}); });
   $("addTable").addEventListener("click", ()=>{
     const t = createTable();
@@ -286,7 +286,7 @@
     if(!newArmed){ newArmed=true; $("newOrder").textContent="Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
     clearTimeout(newTimer); resetNewBtn();
     tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
-    seq=0; $("name").value=""; $("phone").value=""; $("orderNo").value=genOrderNo();
+    seq=0; $("name").value=""; $("phone").value=""; ORDER_NO=genOrderNo();
     priceShown=false; $("price").hidden=true; pdfCache=null; $("ok").textContent="";
     createTable();
     window.scrollTo({top:0, behavior:"smooth"});
@@ -328,10 +328,7 @@
     x.fillStyle="#1E6FF4"; x.fillRect(0,0,W,14);
     if(logoImg){ const lw=500, lh=lw*logoImg.height/logoImg.width; x.drawImage(logoImg,70,46,lw,lh); }
     else { x.fillStyle="#1552c7"; x.font="bold 46px Arial,sans-serif"; x.fillText("KONVEKTOMAT.STORE",70,96); }
-    x.textAlign="right";
-    if(meta&&meta.orderNo){ x.fillStyle="#1552c7"; x.font="bold 26px Arial,sans-serif"; x.fillText("№ "+meta.orderNo, W-70, 92); }
-    if(label){ x.fillStyle="#64748b"; x.font="22px Arial,sans-serif"; x.fillText(label, W-70, 126); }
-    x.textAlign="left";
+    if(label){ x.textAlign="right"; x.fillStyle="#64748b"; x.font="22px Arial,sans-serif"; x.fillText(label, W-70, 104); x.textAlign="left"; }
     x.fillStyle="#64748b"; x.font="26px Arial,sans-serif";
     x.fillText("Маса по поръчка — инокс",70,150);
     const dyimg=180;
@@ -428,7 +425,7 @@
   async function buildPdfBlob(){
     const {jsPDF}=window.jspdf;
     const o=buildOrder();
-    const meta={ orderNo:o.orderNo, priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване" };
+    const meta={ priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване" };
     const cs=await allCanvases(meta);
     const doc=new jsPDF({unit:"mm",format:"a4",orientation:"portrait",compress:true});
     const maxW=190, maxH=277;
@@ -446,7 +443,7 @@
   }
 
   /* ---------- order data ---------- */
-  function orderNumber(){ const el=$("orderNo"); if(!el.value.trim()) el.value=genOrderNo(); return el.value.trim(); }
+  function orderNumber(){ if(!ORDER_NO) ORDER_NO=genOrderNo(); return ORDER_NO; }
   function tablesSnapshot(){
     return tables.map(t=>{
       const v=t.vals;
@@ -548,5 +545,5 @@
   });
 
   /* ---------- init ---------- */
-  $("orderNo").value = genOrderNo();
+  ORDER_NO = genOrderNo();
   createTable();
