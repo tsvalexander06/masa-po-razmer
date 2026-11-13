@@ -40,6 +40,10 @@
     background:#fff;color:var(--ink)}
   input:focus,textarea:focus,select:focus{outline:none;border-color:var(--brand)}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .row3{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+  @media (max-width:520px){ .row3{grid-template-columns:1fr} }
+  .row3 .hint,.f-advBox .row .hint{display:block}
+  .f-advBox select,.f-advBox input{margin-top:3px}
   .toggle{display:flex;align-items:center;gap:9px;margin:12px 0;font-size:15px;font-weight:600;cursor:pointer}
   .toggle input{width:20px;height:20px;accent-color:var(--brand);flex:0 0 auto}
   .sub{margin-left:29px;margin-top:-4px}
