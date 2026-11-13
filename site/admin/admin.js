@@ -3,7 +3,7 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:10, shelfGapW:20, feet:0, tubeWall:1.5,
+  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -44,6 +44,13 @@
       delete s.bendDed; s.v = 2;
       try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
     }
+    // v3: shelves 5 мм smaller in length and depth (10 → 15, 20 → 25)
+    if(!(+s.v >= 3)){
+      if(+s.shelfGap === 10) s.shelfGap = DEFAULTS.shelfGap;
+      if(+s.shelfGapW === 20) s.shelfGapW = DEFAULTS.shelfGapW;
+      s.v = 3;
+      try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
+    }
     return s;
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
@@ -81,7 +88,7 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
-    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:10, shelfGapW:20, thickness:1.5
+    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
