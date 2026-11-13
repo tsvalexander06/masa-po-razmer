@@ -57,8 +57,8 @@
       <input type="number" class="f-splashH" value="100" min="20" max="300" step="10">
     </div>
 
-    <label>Отстояние на задните крака от задния ръб/борд <span class="hint">(мм, мин. 70 мм)</span></label>
-    <input type="number" class="f-legBack" value="70" min="70" max="400" step="1">
+    <label>Отстояние на задните крака от задния ръб/борд <span class="hint">(мм, мин. 12 мм)</span></label>
+    <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
 
     <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долна основа (плот)</label>
     <div class="sub f-baseBox">
@@ -112,7 +112,7 @@
     return {
       L:+q('.f-L').value||0, D:+q('.f-D').value||0, H,
       splashOn:q('.f-splashOn').checked, splashH:+q('.f-splashH').value||0,
-      legBack:Math.max(70, +q('.f-legBack').value||0),
+      legBack:Math.max(12, +q('.f-legBack').value||0),   // минимум 12 мм (зад перото 12 мм)
       baseOn:q('.f-baseOn').checked, baseH,
       midOn:q('.f-midOn').checked, mid2H,
       notes:q('.f-notes').value.trim(),
