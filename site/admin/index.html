@@ -40,7 +40,7 @@
   .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
   label{display:block;font-size:12px;font-weight:600;color:var(--ink)}
   label .u{font-weight:400;color:var(--muted)}
-  input[type=number],input[type=text],textarea{width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--line);
+  input[type=number],input[type=text],input[type=date],textarea{width:100%;margin-top:4px;padding:8px 10px;border:1px solid var(--line);
     border-radius:8px;font-size:15px;background:#fff;color:var(--ink);font-family:inherit}
   input:focus,textarea:focus{outline:none;border-color:var(--brand)}
   .chk{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;margin-top:22px}
@@ -110,19 +110,52 @@
   .pricebox>div{display:flex;justify-content:space-between;gap:12px}
   .pricebox>div:first-child b{color:var(--brand-dark);font-size:17px}
   .pricebox>div:last-child{border-top:1px solid var(--line);padding-top:4px;margin-top:2px}
-  .printonly{display:none}
-  .printsum{font-size:13px;line-height:1.6}
+  .printsum{font-size:14px;line-height:1.6}
   .printsum b{font-weight:700}
-  /* workshop print: materials summary first, one line per table instead of the inputs, no forced page breaks */
+  .cnt{color:var(--muted);font-weight:600;font-size:13px;text-transform:none;letter-spacing:0}
+  .badge{display:inline-block;min-width:20px;padding:0 6px;margin-left:6px;border-radius:10px;background:var(--brand);color:#fff;font-size:12px;line-height:20px;text-align:center}
+  .badge:empty{display:none}
+  .btn.small{padding:6px 10px;font-size:13px}
+  .btn.big{padding:13px 22px;font-size:16px}
+  .btn.cancel{border-color:#fca5a5;color:var(--bad);background:#fff}
+  .btn:disabled{opacity:.5;cursor:default}
+  table.list{min-width:720px}
+  table.list tbody tr{cursor:pointer}
+  table.list tbody tr:hover td{background:#f5f9ff}
+  table.list tr.sel td{background:#e3eeff}
+  td.acts{white-space:nowrap}
+  .vhead{border-top-color:var(--brand-dark)}
+  .vrow{display:flex;gap:10px;align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+  .vt{font-size:17px}
+  .vbtns{display:flex;gap:8px;flex-wrap:wrap}
+  .stage{display:inline-block;font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;vertical-align:middle;background:#e0ecff;color:var(--brand-dark)}
+  .stage.st-processing{background:#fef3c7;color:#92400e}
+  .tabs{display:flex;gap:4px;margin-top:12px;border-bottom:2px solid #e1ebfb;overflow-x:auto}
+  .tab{background:none;border:none;border-bottom:3px solid transparent;margin-bottom:-2px;padding:9px 14px;font-size:15px;font-weight:700;color:var(--muted);cursor:pointer;white-space:nowrap;font-family:inherit}
+  .tab.active{color:var(--brand-dark);border-bottom-color:var(--brand)}
+  @media screen{
+    .viewer[data-tab="edit"] #printView,.viewer[data-tab="print"] #editView{display:none}
+  }
+  .tgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+  @media (max-width:760px){ .tgrid{grid-template-columns:1fr} }
+  .drawbox{background:linear-gradient(180deg,#f8fafc,#eef3f9);border:1px solid var(--line);border-radius:10px}
+  .drawbox svg{width:100%;height:auto;display:block}
+  .tgrid .grid{grid-template-columns:repeat(auto-fill,minmax(140px,1fr))}
+  .chks{display:flex;flex-wrap:wrap;gap:4px 18px}
+  .chks .chk{margin-top:12px}
+  input:disabled,textarea:disabled{background:#f1f5f9;color:#475569}
+  .bottombar{border-top-color:var(--ok)}
+  .bottombar .pricebox{font-size:15px}
+  .procbox b.neg{color:var(--bad)} .procbox b.pos{color:var(--ok)}
+  .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:14px}
+  /* workshop print: only the print view of the open order */
   @media print{
     @page{size:A4;margin:12mm 10mm}
     body{background:#fff}
     header{padding:0 0 8px}
-    .wrap{max-width:none;padding:0;display:flex;flex-direction:column}
-    #results{display:contents}
-    .card.summary{order:-1}
-    .noprint,.drop,details.settings,.btn,.editor{display:none!important}
-    .printonly{display:block}
+    .burger{display:none}
+    .wrap{max-width:none;padding:0}
+    .noprint,.drop,details.settings,.btn,#editView{display:none!important}
     body{font-size:15px}
     header .t{font-size:22px} header .s{font-size:15px}
     .card{box-shadow:none;border:1px solid #cbd5e1;border-top:3px solid var(--brand);padding:12px 14px;margin-bottom:12px}
@@ -157,8 +190,8 @@
 <div class="menubg" id="menubg" hidden></div>
 <nav class="menu" id="menu" hidden>
   <div class="mh">Меню</div>
-  <button class="menuItem" data-go="work" type="button">Разкрой</button>
-  <button class="menuItem" data-go="processing" type="button">В обработка</button>
+  <button class="menuItem" data-go="work" type="button">Разкрой <span class="badge" id="cntWork"></span></button>
+  <button class="menuItem" data-go="processing" type="button">В обработка <span class="badge" id="cntProc"></span></button>
   <button class="menuItem" data-go="archive" type="button">Архив</button>
   <button class="menuItem" data-go="stock" type="button">Фира — склад</button>
   <button class="menuItem" data-go="settings" type="button">Настройки</button>
@@ -167,30 +200,32 @@
 <div class="wrap">
   <section class="page" data-page="work">
   <div class="card noprint">
-    <h2>Поръчка</h2>
+    <h2>Нови поръчки</h2>
     <div class="drop" id="drop" tabindex="0" role="button">
-      <b>📄 Пусни PDF-а тук</b> или натисни, за да го избереш
-      <div class="muted" style="margin-top:4px">PDF-ът, който клиентът изпраща от формата. Файлът се чете само на това устройство — никъде не се качва.</div>
+      <b>📄 Пусни PDF-ите тук</b> или натисни, за да ги избереш
+      <div class="muted" style="margin-top:4px">Може няколко наведнъж — всяка влиза в списъка по-долу. Файловете се четат само на това устройство — никъде не се качват.</div>
     </div>
-    <input type="file" id="file" accept="application/pdf,.pdf,application/json,.json" hidden>
+    <input type="file" id="file" accept="application/pdf,.pdf,application/json,.json" multiple hidden>
     <div class="row">
       <button class="btn" id="manual" type="button">✏️ Въведи поръчка ръчно</button>
-      <button class="btn primary" id="print" type="button" disabled>🖨 Печат на разкроя</button>
-      <button class="btn danger" id="clearOrder" type="button" style="display:none">✕ Откажи поръчката</button>
     </div>
     <div class="status" id="status"></div>
   </div>
-
-  <div id="order"></div>
-  <div id="results"></div>
+  <div class="card noprint">
+    <h2>Чакат разкрой <span class="cnt" id="workCount"></span></h2>
+    <div id="workList"></div>
+  </div>
+  <div id="workHost"></div>
   </section>
 
   <section class="page" data-page="processing" hidden>
-    <div class="card">
-      <h2>В обработка</h2>
-      <div class="muted">Данни за доставка и продажна цена на заредената поръчка. Попълни и натисни „Запази в архива“.</div>
-      <div id="processing" style="margin-top:12px"></div>
+    <div class="card noprint">
+      <h2>В обработка <span class="cnt" id="procCount"></span></h2>
+      <div class="muted">Поръчки с потвърден разкрой, които се изработват. Отворете поръчка, попълнете продажна цена и доставка и натиснете „Архивирай“.</div>
+      <div id="procList" style="margin-top:10px"></div>
+      <div class="status" id="procStatus"></div>
     </div>
+    <div id="procHost"></div>
   </section>
 
   <section class="page" data-page="stock" hidden>
@@ -221,7 +256,7 @@
     <input type="text" id="archSearch" placeholder="Търсене по номер, клиент, телефон, място..." style="margin-top:10px">
     <div id="archiveList" style="margin-top:10px"></div>
     <div class="row">
-      <button class="btn" id="archExport" type="button">⬇ Свали резервно копие (с документите)</button>
+      <button class="btn" id="archExport" type="button">⬇ Свали резервно копие (всички поръчки с документите)</button>
       <button class="btn" id="archImport" type="button">⬆ Зареди копие</button>
       <input type="file" id="archImportFile" accept=".json,application/json" hidden>
     </div>
@@ -237,6 +272,26 @@
     <div class="row"><button class="btn" id="resetSettings" type="button">Възстанови стойностите по подразбиране</button></div>
   </div>
   </section>
+
+  <!-- the open order: shown under the list in „Разкрой“ or „В обработка“ -->
+  <div id="viewer" class="viewer" data-tab="print" hidden>
+    <div class="card vhead noprint">
+      <div class="vrow">
+        <div id="vTitle" class="vtitle"></div>
+        <div class="vbtns">
+          <button class="btn small" id="vDoc" type="button">Документ на клиента (PDF)</button>
+          <button class="btn small" id="vClose" type="button">✕ Затвори</button>
+        </div>
+      </div>
+      <div class="tabs" role="tablist">
+        <button class="tab" data-tab="print" type="button">Преглед за печат</button>
+        <button class="tab" data-tab="edit" type="button">Маси — редакция</button>
+      </div>
+    </div>
+    <div id="printView"></div>
+    <div id="editView"><div id="order"></div></div>
+    <div class="card bottombar noprint" id="bottomBar"></div>
+  </div>
 </div>
 
 <div id="gate" class="gate">

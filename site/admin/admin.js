@@ -100,7 +100,58 @@
   const eur2 = v => (v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €");
   let PRICING = null; // latest computed pricing for the loaded order (set in recompute)
 
-  // the customer form stores "MPR1:<base64 JSON>" in the PDF's Keywords field
+  /* ---------- orders: Разкрой (new) → В обработка (processing) → Архив (archived) ----------
+     Every order is one record in localStorage; its PDF lives in IndexedDB under the same id.
+     The old archive (mpr-admin-orders-v1) is copied in once as archived orders and left as it was, as a backup. */
+  const ORD_KEY = "mpr-admin-orders-v2", OLD_ARCH_KEY = "mpr-admin-orders-v1";
+  const STAGES = { new:"Разкрой", processing:"В обработка", archived:"Архив" };
+  let ORD = loadOrders();
+  function loadOrders(){
+    try{
+      const d = JSON.parse(localStorage.getItem(ORD_KEY) || "null");
+      if(d && Array.isArray(d.orders)) return { orders:d.orders, next:Math.max(1, +d.next || 1) };
+    }catch(e){}
+    const o = { orders:[], next:1 };
+    try{
+      const old = JSON.parse(localStorage.getItem(OLD_ARCH_KEY) || "null");
+      if(old && Array.isArray(old.orders)){
+        o.orders = old.orders.filter(r => r && r.id).map(r => Object.assign({}, r, { stage:"archived", archivedAt:r.archivedAt || r.savedAt || "" }));
+        o.next = Math.max(1, +old.next || 1, 1 + Math.max(0, ...o.orders.map(r => +r.serial || 0)));
+        localStorage.setItem(ORD_KEY, JSON.stringify(o));
+      }
+    }catch(e){}
+    return o;
+  }
+  let saveTimer = null;
+  function saveOrders(){
+    clearTimeout(saveTimer); saveTimer = null;
+    try{ localStorage.setItem(ORD_KEY, JSON.stringify(ORD)); return true; }
+    catch(e){ setStatus("⚠ Браузърът не позволява запазване — свалете резервно копие от „Архив“.", "bad"); return false; }
+  }
+  const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveOrders, 400); };
+  window.addEventListener("pagehide", () => { if(saveTimer) saveOrders(); });
+
+  const byStage = st => ORD.orders.filter(o => o.stage === st);
+  const findOrder = id => ORD.orders.find(o => o.id === id) || null;
+  const newId = () => "r" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  const orderSerial = n => "№ " + String(n).padStart(4, "0");
+  const serTxt = o => o && o.serial ? orderSerial(o.serial) : "без №";
+  const nTablesOf = o => (o.tables || []).reduce((a, t) => a + (+t.qty || 1), 0);
+  const fmtDate = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString("bg-BG") : ""; };
+  const fmtDT = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleString("bg-BG", { dateStyle:"short", timeStyle:"short" }) : ""; };
+  const idsTxt = list => list.length ? list.join(", ") : "—";
+  const clientPriceOf = o => { const p = priceFor({ tables:(o.tables || []).map(normTable) }); return p ? p.total : null; };
+
+  // the same order loaded twice is recognised by its client number, or by its content
+  function fingerprint(o){
+    const s = JSON.stringify([o.name || "", o.phone || "", o.created || "", (o.tables || []).map(t =>
+      [+t.qty || 1, +t.L || 0, +t.D || 0, +t.H || 0, !!t.splashOn, +t.splashH || 0, +t.legBack || 0, !!t.baseOn, +t.baseH || 0, !!t.midOn])]);
+    let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
+    return h.toString(36) + s.length.toString(36);
+  }
+  const findDuplicate = rec => ORD.orders.find(o => o !== rec && ((rec.orderNo && o.orderNo === rec.orderNo) || fingerprint(o) === fingerprint(rec)));
+
+  // the customer form stores "MPR1:<base64 JSON>" in the PDF
   function decodeOrderFromPdf(buf){
     const raw = new TextDecoder("latin1").decode(new Uint8Array(buf));
     if(!raw.startsWith("%PDF")) throw new Error("not_pdf");
@@ -112,97 +163,150 @@
     return data;
   }
 
-  let order = null;
+  const SEL = { work:null, processing:null };   // the open order on each page
+  let PAGE = "work", TAB = "print";
+  let order = null;                             // the open order record (on the current page)
 
   function setStatus(msg, kind){ $("status").className = "status " + (kind || ""); $("status").textContent = msg; }
+  function procMsg(msg, kind){ $("procStatus").className = "status " + (kind || ""); $("procStatus").textContent = msg; }
 
-  async function loadFile(file){
-    if(!file) return;
-    try{
-      // an order saved as .json (same shape as the data inside the PDF)
-      if(/\.json$/i.test(file.name)){
-        const data = JSON.parse(await file.text());
-        if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_json");
-        order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:data.source || file.name,
-                  orderNo:data.orderNo || "", priceFromPdf:data.price || null, doc:null, archive:{},
-                  tables:data.tables.map(normTable) };
-        setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
-        renderOrder();
-        return;
-      }
-      const buf = await file.arrayBuffer();
-      const data = decodeOrderFromPdf(buf);
-      // keep the PDF so it can be saved as the order's document in the archive
-      const doc = { bytes:buf.slice(0), name:file.name };
-      if(data){
-        order = { name:data.name || "", phone:data.phone || "", created:data.created || "", source:file.name,
-                  orderNo:data.orderNo || "", priceFromPdf:data.price || null, doc, archive:{},
-                  tables:data.tables.map(normTable) };
-        setStatus("✓ Заредена поръчка от „" + file.name + "“: " + order.tables.length + (order.tables.length === 1 ? " маса." : " маси."), "ok");
-      }else{
-        order = { name:"", phone:"", created:"", source:file.name, orderNo:"", priceFromPdf:null, doc, archive:{}, tables:[normTable({})] };
-        setStatus("⚠ В „" + file.name + "“ няма данни за поръчката — вероятно е създаден преди обновлението на формата. Въведете размерите от PDF-а ръчно по-долу.", "warn");
-      }
-      renderOrder();
-    }catch(e){
-      setStatus(e && e.message === "not_pdf" ? "✕ „" + file.name + "“ не е PDF файл." :
-                /\.json$/i.test(file.name) ? "✕ „" + file.name + "“ не е файл с поръчка." : "✕ PDF-ът не може да бъде прочетен.", "bad");
+  function makeRecord(data, source){
+    const d = data || {};
+    return { id:newId(), stage:"new", serial:null, addedAt:new Date().toISOString(),
+      name:d.name || "", phone:d.phone || "", created:d.created || "", source:source || "", orderNo:d.orderNo || "",
+      priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : [{}]).map(normTable),
+      hasDoc:false, docName:"", cut:null, clientPrice:null, cost:null, costMaterials:null, price:null, place:"", deliveryDate:"" };
+  }
+  async function readOrderFile(file){
+    if(/\.json$/i.test(file.name)){
+      const data = JSON.parse(await file.text());
+      if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_json");
+      return { data, doc:null };
     }
+    const buf = await file.arrayBuffer();
+    return { data:decodeOrderFromPdf(buf), doc:new Blob([buf], { type:"application/pdf" }) };
+  }
+  // one or more files → new orders in Разкрой; the first new one is opened
+  async function loadFiles(fileList){
+    const files = Array.from(fileList || []).filter(Boolean);
+    if(!files.length) return;
+    const msgs = [], rank = { ok:0, warn:1, bad:2 };
+    let kind = "ok", first = null;
+    const flag = k => { if(rank[k] > rank[kind]) kind = k; };
+    for(const file of files){
+      try{
+        const { data, doc } = await readOrderFile(file);
+        const rec = makeRecord(data, file.name);
+        const dup = data ? findDuplicate(rec) : null;
+        if(dup && dup.stage !== "archived"){
+          msgs.push("„" + file.name + "“ вече е заредена (" + STAGES[dup.stage] + (dup.serial ? ", " + orderSerial(dup.serial) : "") + ").");
+          flag("warn");
+          if(dup.stage === "new" && !first) first = dup;
+          continue;
+        }
+        if(doc){ try{ await docPut(rec.id, doc, file.name); rec.hasDoc = true; rec.docName = file.name; }catch(e){} }
+        if(!data) rec.noData = true;
+        ORD.orders.push(rec);
+        if(!first) first = rec;
+        if(!data){ msgs.push("⚠ В „" + file.name + "“ няма данни за поръчката — въведете размерите в „Маси — редакция“."); flag("warn"); }
+        else msgs.push("✓ „" + file.name + "“: " + rec.tables.length + (rec.tables.length === 1 ? " маса" : " маси") +
+          (dup ? " — внимание: същата поръчка вече е в архива (" + serTxt(dup) + ")" : "") + ".");
+        if(dup) flag("warn");
+      }catch(e){
+        msgs.push(e && e.message === "not_pdf" ? "✕ „" + file.name + "“ не е PDF файл." :
+                  /\.json$/i.test(file.name) ? "✕ „" + file.name + "“ не е файл с поръчка." : "✕ „" + file.name + "“ не може да бъде прочетен.");
+        flag("bad");
+      }
+    }
+    saveOrders();
+    if(first){ SEL.work = first.id; TAB = first.noData ? "edit" : "print"; }
+    showPage("work");
+    setStatus(msgs.join(" "), kind);
+    if(first) $("viewer").scrollIntoView({ behavior:"smooth", block:"start" });
   }
 
   const drop = $("drop");
   drop.addEventListener("click", () => $("file").click());
   drop.addEventListener("keydown", e => { if(e.key === "Enter" || e.key === " "){ e.preventDefault(); $("file").click(); } });
-  $("file").addEventListener("change", () => { loadFile($("file").files[0]); $("file").value = ""; });
+  $("file").addEventListener("change", () => { const f = Array.from($("file").files); $("file").value = ""; loadFiles(f); });
   ["dragenter","dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("over"); }));
   ["dragleave","drop"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.remove("over"); }));
-  drop.addEventListener("drop", e => loadFile(e.dataTransfer.files[0]));
+  drop.addEventListener("drop", e => loadFiles(e.dataTransfer.files));
   $("manual").addEventListener("click", () => {
-    order = { name:"", phone:"", created:"", source:"", orderNo:"", priceFromPdf:null, doc:null, archive:{}, tables:[normTable({})] };
-    setStatus("Ръчна поръчка — въведете размерите.", "");
-    renderOrder();
+    const rec = makeRecord(null, ""); ORD.orders.push(rec); saveOrders();
+    SEL.work = rec.id; TAB = "edit"; showPage("work");
+    setStatus("Ръчна поръчка — въведете данните в „Маси — редакция“.", "");
+    $("viewer").scrollIntoView({ behavior:"smooth", block:"start" });
   });
-  $("print").addEventListener("click", () => window.print());
 
-  /* ---------- order editor ---------- */
+  /* ---------- viewer: one open order, two views (print / edit) and the bottom bar ---------- */
+  function openViewer(){
+    const host = PAGE === "work" ? $("workHost") : PAGE === "processing" ? $("procHost") : null;
+    const want = PAGE === "work" ? "new" : "processing";
+    const rec = host && SEL[PAGE] ? findOrder(SEL[PAGE]) : null;
+    order = rec && rec.stage === want ? rec : null;
+    if(host && !order) SEL[PAGE] = null;
+    const v = $("viewer");
+    if(!order){ v.hidden = true; CURRENT = null; PRICING = null; return; }
+    order.tables = order.tables.map(normTable);
+    host.appendChild(v); v.hidden = false;
+    setTab(TAB);
+    renderHead(); renderEdit(); recompute();
+  }
+  function setTab(tab){
+    TAB = tab === "edit" ? "edit" : "print";
+    $("viewer").dataset.tab = TAB;
+    document.querySelectorAll("#viewer .tab").forEach(b => b.classList.toggle("active", b.dataset.tab === TAB));
+  }
+  document.querySelectorAll("#viewer .tab").forEach(b => b.addEventListener("click", () => setTab(b.dataset.tab)));
+  $("vClose").addEventListener("click", () => { SEL[PAGE] = null; openViewer(); renderLists(); });
+  $("vDoc").addEventListener("click", () => { if(order) openDoc(order.id, m => (PAGE === "work" ? setStatus : procMsg)(m, "warn")); });
+
+  function renderHead(){
+    const o = order;
+    $("vTitle").innerHTML = '<div class="vt"><b>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Нова поръчка") + '</b> · ' + esc(o.name || "без име") +
+      (o.phone ? ' · ' + esc(o.phone) : '') + ' <span class="stage st-' + o.stage + '">' + esc(STAGES[o.stage]) + '</span></div>' +
+      '<div class="muted">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена") + (o.addedAt ? " · заредена " + esc(fmtDT(o.addedAt)) : "") +
+      (o.confirmedAt ? " · потвърдена " + esc(fmtDT(o.confirmedAt)) : "") + '</div>';
+    $("vDoc").hidden = !o.hasDoc;
+  }
+  // after any change to the open order: keep it, refresh the lists and the title
+  function edited(){ saveSoon(); renderLists(); renderHead(); }
+
+  /* ---------- edit view: the tables like on the customer's document (3D drawing + fields) ---------- */
   const FIELDS = [
     ["qty","Брой еднакви маси","бр."], ["L","Дължина","мм"], ["D","Дълбочина","мм"], ["H","Височина","мм"],
     ["legBack","Задни крака от ръба","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
   ];
-  function renderOrder(){
-    $("print").disabled = !order;
-    $("clearOrder").style.display = order ? "inline-flex" : "none";
-    if(!order){ $("order").innerHTML = ""; $("results").innerHTML = ""; renderProcessing(); return; }
-    const created = order.created ? new Date(order.created) : null;
-    let h = '<div class="card"><h2>Клиент</h2><div class="grid editor">'+
-      '<label>Име<input type="text" id="o-name" value="'+esc(order.name)+'"></label>'+
-      '<label>Телефон<input type="text" id="o-phone" value="'+esc(order.phone)+'"></label></div>'+
-      '<div class="printonly printsum" id="o-print"></div>'+
-      '<div class="muted" style="margin-top:8px">'+
-        (order.source ? 'Файл: '+esc(order.source) : 'Ръчно въведена поръчка')+
-        (created && !isNaN(created) ? ' · Създадена: '+esc(created.toLocaleString("bg-BG")) : '')+
-      '</div></div>';
-    order.tables.forEach((t, i) => {
-      h += '<div class="card tbl" data-i="'+i+'">'+
-        '<h2 class="tablehead"><span class="name">Маса '+(i+1)+'</span>'+
-        (order.tables.length > 1 ? '<button class="btn danger noprint" data-act="del" type="button">✕ Премахни</button>' : '')+
-        '</h2><div class="printonly printsum"></div><div class="editor"><div class="grid">'+
-        FIELDS.map(([k,l,u]) => '<label>'+esc(l)+' <span class="u">('+u+')</span><input type="number" min="0" step="1" data-k="'+k+'" value="'+esc(t[k])+'"></label>').join("")+
-        '<label class="chk"><input type="checkbox" data-k="splashOn"'+(t.splashOn?" checked":"")+'> Борд</label>'+
-        '<label class="chk"><input type="checkbox" data-k="baseOn"'+(t.baseOn?" checked":"")+'> Долна основа (плот)</label>'+
-        '<label class="chk"><input type="checkbox" data-k="midOn"'+(t.midOn?" checked":"")+'> Втори междинен плот</label>'+
-        '</div>'+
-        '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes">'+esc(t.notes)+'</textarea></label></div>'+
-        '<div class="cutout"></div></div>';
+  function renderEdit(){
+    const o = order, ro = o.stage !== "new", dis = ro ? " disabled" : "";
+    let h = '<div class="card"><h2>Клиент</h2>' +
+      (ro ? '<div class="note" style="margin:0 0 12px">Разкроят е потвърден, затова полетата са заключени. За промяна на размерите натиснете „Върни в Разкрой“ най-долу.</div>' : '') +
+      '<div class="grid"><label>Име<input type="text" id="o-name" value="' + esc(o.name) + '"' + dis + '></label>' +
+      '<label>Телефон<input type="text" id="o-phone" value="' + esc(o.phone) + '"' + dis + '></label></div></div>';
+    o.tables.forEach((t, i) => {
+      h += '<div class="card tbl" data-i="' + i + '"><h2 class="tablehead"><span class="name">Маса ' + (i + 1) + '</span>' +
+        (o.tables.length > 1 && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
+        '<div class="tgrid"><div class="drawbox"><svg class="draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
+        '<div><div class="grid">' +
+        FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
+        '</div><div class="chks">' +
+        '<label class="chk"><input type="checkbox" data-k="splashOn"' + (t.splashOn ? " checked" : "") + dis + '> Борд</label>' +
+        '<label class="chk"><input type="checkbox" data-k="baseOn"' + (t.baseOn ? " checked" : "") + dis + '> Долна основа (плот)</label>' +
+        '<label class="chk"><input type="checkbox" data-k="midOn"' + (t.midOn ? " checked" : "") + dis + '> Втори междинен плот <span class="u mid2info"></span></label>' +
+        '</div><div class="muted" style="margin-top:6px">Ламарина 1.5 мм · профил на краката 30×30 мм</div>' +
+        '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes"' + dis + '>' + esc(t.notes) + '</textarea></label></div></div></div>';
     });
-    h += '<div class="row noprint" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
+    if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
     $("order").innerHTML = h;
+    o.tables.forEach((t, i) => drawTable(i));
+    if(ro) return;
 
-    $("o-name").addEventListener("input", e => { order.name = e.target.value; renderProcessing(); });
-    $("o-phone").addEventListener("input", e => { order.phone = e.target.value; renderProcessing(); });
-    $("addT").addEventListener("click", () => { order.tables.push(normTable({})); renderOrder(); });
-    document.querySelectorAll(".tbl").forEach(card => {
-      const t = order.tables[+card.dataset.i];
+    $("o-name").addEventListener("input", e => { o.name = e.target.value; recompute(); edited(); });
+    $("o-phone").addEventListener("input", e => { o.phone = e.target.value; recompute(); edited(); });
+    $("addT").addEventListener("click", () => { o.tables.push(normTable({})); renderEdit(); recompute(); edited(); });
+    document.querySelectorAll("#order .tbl").forEach(card => {
+      const i = +card.dataset.i, t = o.tables[i];
       card.querySelectorAll("[data-k]").forEach(inp => {
         inp.addEventListener("input", () => {
           const k = inp.dataset.k;
@@ -213,13 +317,112 @@
             if(k === "baseOn" && !t.baseOn){ t.midOn = false; card.querySelector('[data-k="midOn"]').checked = false; }
           }else if(inp.tagName === "TEXTAREA"){ t[k] = inp.value; }
           else{ t[k] = k === "qty" ? Math.max(1, Math.round(+inp.value || 1)) : (+inp.value || 0); }
-          recompute();
+          drawTable(i); recompute(); edited();
         });
       });
       const del = card.querySelector('[data-act="del"]');
-      if(del) del.addEventListener("click", () => { order.tables.splice(+card.dataset.i, 1); renderOrder(); });
+      if(del) del.addEventListener("click", () => {
+        if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
+        o.tables.splice(i, 1); renderEdit(); recompute(); edited();
+      });
     });
-    recompute();
+  }
+  function drawTable(i){
+    const card = document.querySelector('#order .tbl[data-i="' + i + '"]'); if(!card) return;
+    const t = order.tables[i];
+    drawBlueprint(Object.assign({}, t, { mid2H:mid2H(t) }), card.querySelector(".draw"));
+    card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
+  }
+
+  /* ---------- isometric 3D drawing — same as the customer form (site/app.js) ---------- */
+  function drawBlueprint(v, svgEl){
+    const realL=v.L, realD=v.D, realH=v.H;
+    if(!realL||!realD||!realH){ svgEl.innerHTML=''; return; }
+    const splashOn=v.splashOn, splashH=v.splashH;
+    const legBack=v.legBack, baseOn=v.baseOn, baseH=v.baseH;
+    const midOn=v.midOn;
+    const legProfile=v.legProfile||30;
+
+    const w=realL/1000, d=realD/1000, h=realH/1000;
+    const tt=0.04, lg=legProfile/1000, st=0.03;
+    const legH=h-tt;
+
+    const P=(x,y,z)=>({x:(x-z)*0.866, y:(x+z)*0.5 - y});
+    const shapes=[];
+    function box(x,y,z,bw,bh,bd,ct,cf,cr){
+      const c=(X,Y,Z)=>P(x+X,y+Y,z+Z);
+      shapes.push({t:'poly',fill:cr,pts:[c(bw,0,0),c(bw,bh,0),c(bw,bh,bd),c(bw,0,bd)]});
+      shapes.push({t:'poly',fill:cf,pts:[c(0,0,bd),c(bw,0,bd),c(bw,bh,bd),c(0,bh,bd)]});
+      shapes.push({t:'poly',fill:ct,pts:[c(0,bh,0),c(bw,bh,0),c(bw,bh,bd),c(0,bh,bd)]});
+    }
+    const TOP='url(#gT)',FRONT='url(#gF)',RIGHT='url(#gR)';
+    const B2='url(#gT2)',B2F='url(#gF2)',B2R='url(#gR2)';
+
+    const backZ=Math.min(d*0.45, Math.max(0, legBack/1000));
+    const lxL=0.03, lxR=w-0.03-lg, frontZ=d-0.03-lg;
+    const gw=PRICE.shelfGapW/2000;
+    const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=gw, baseX1=w-gw;
+    const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, st, baseZ1-baseZ0, B2,B2F,B2R);
+
+    shapes.push({t:'shadow',pts:[P(-0.03,0,-0.03),P(w+0.03,0,-0.03),P(w+0.03,0,d+0.03),P(-0.03,0,d+0.03)]});
+    box(lxL,0,backZ,lg,legH,lg,TOP,FRONT,RIGHT);
+    box(lxR,0,backZ,lg,legH,lg,TOP,FRONT,RIGHT);
+
+    let by=0, midY=0;
+    if(baseOn||midOn){ by=Math.min(legH-0.05, Math.max(0.03, baseH/1000)); shelf(by); }
+    if(midOn){ midY=Math.min(legH-0.05, (by+legH)/2); shelf(midY); }
+
+    box(lxL,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
+    box(lxR,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
+    box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000); box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
+
+    const off=Math.max(w,d,h)*0.16+0.05;
+    function dim(a,b,lp,txt,anchor,dx,dy,ext){
+      shapes.push({t:'dim',pts:[a,b]});
+      shapes.push({t:'text',p:lp,txt,anchor,dx:dx||0,dy:dy||0});
+      if(ext) ext.forEach(e=>shapes.push({t:'ext',pts:e}));
+    }
+    dim(P(0,0,d+off),P(w,0,d+off),P(w/2,0,d+off),realL+'','middle',0,16,
+        [[P(0,0,d),P(0,0,d+off)],[P(w,0,d),P(w,0,d+off)]]);
+    dim(P(w+off,0,0),P(w+off,0,d),P(w+off,0,d/2),realD+'','start',8,4,
+        [[P(w,0,0),P(w+off,0,0)],[P(w,0,d),P(w+off,0,d)]]);
+    dim(P(w+off,0,d),P(w+off,h,d),P(w+off,h/2,d),realH+'','start',8,0,
+        [[P(w,h,d),P(w+off,h,d)]]);
+    if(legBack>0){ const sx=w+off*1.9;
+      dim(P(sx,0,0),P(sx,0,backZ),P(sx,0,backZ/2),legBack+'','start',10,-2,
+        [[P(w,0,0),P(sx,0,0)],[P(w,0,backZ),P(sx,0,backZ)]]);
+      shapes.push({t:'cap',p:P(sx,0,backZ/2),txt:'заден крак',dx:10,dy:14});
+    }
+    if(baseOn) dim(P(-off,0,d),P(-off,by,d),P(-off,by/2,d),baseH+'','end',-8,0,
+        [[P(0,0,d),P(-off,0,d)],[P(0,by,d),P(-off,by,d)]]);
+    if(midOn){ const mx2=-off*2.0;
+      dim(P(mx2,0,d),P(mx2,midY,d),P(mx2,midY/2,d),v.mid2H+'','end',-8,0,
+        [[P(0,midY,d),P(mx2,midY,d)]]);
+      shapes.push({t:'cap',p:P(mx2,midY,d),txt:'втори плот',dx:-72,dy:-6});
+    }
+
+    let miX=1e9,maX=-1e9,miY=1e9,maY=-1e9;
+    shapes.forEach(s=>{(s.pts?s.pts:[s.p]).forEach(p=>{miX=Math.min(miX,p.x);maX=Math.max(maX,p.x);miY=Math.min(miY,p.y);maY=Math.max(maY,p.y);});});
+    const VW=560,VH=420,pad=46;
+    const sc=Math.min((VW-2*pad)/(maX-miX),(VH-2*pad)/(maY-miY));
+    const offx=(VW-(maX-miX)*sc)/2, offy=(VH-(maY-miY)*sc)/2;
+    const mx=x=>offx+(x-miX)*sc, my=y=>offy+(y-miY)*sc;
+
+    let svg='<defs><marker id="ar" markerWidth="9" markerHeight="9" refX="4.5" refY="4.5" orient="auto"><path d="M1 1L8 4.5L1 8" fill="none" stroke="#1E6FF4" stroke-width="1.4"/></marker>'+
+      '<linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f3f8fc"/><stop offset="1" stop-color="#dae6f0"/></linearGradient>'+
+      '<linearGradient id="gF" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#d2dde9"/><stop offset="1" stop-color="#b1c3d6"/></linearGradient>'+
+      '<linearGradient id="gR" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#b7c7d9"/><stop offset="1" stop-color="#94a9be"/></linearGradient>'+
+      '<linearGradient id="gT2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e9f0f6"/><stop offset="1" stop-color="#d0dbe6"/></linearGradient>'+
+      '<linearGradient id="gF2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#c5d2df"/><stop offset="1" stop-color="#a9bbcd"/></linearGradient>'+
+      '<linearGradient id="gR2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#a9bacd"/><stop offset="1" stop-color="#8aa1b7"/></linearGradient></defs>';
+    shapes.forEach(s=>{ if(s.t==='shadow') svg+='<polygon points="'+s.pts.map(p=>mx(p.x).toFixed(1)+','+my(p.y).toFixed(1)).join(' ')+'" fill="#334155" opacity="0.07"/>'; });
+    shapes.forEach(s=>{ if(s.t==='poly') svg+='<polygon points="'+s.pts.map(p=>mx(p.x).toFixed(1)+','+my(p.y).toFixed(1)).join(' ')+'" fill="'+s.fill+'" stroke="#5f7d9e" stroke-width="1" stroke-linejoin="round"/>'; });
+    shapes.forEach(s=>{ if(s.t==='ext'){const a=s.pts[0],b=s.pts[1];svg+='<line x1="'+mx(a.x).toFixed(1)+'" y1="'+my(a.y).toFixed(1)+'" x2="'+mx(b.x).toFixed(1)+'" y2="'+my(b.y).toFixed(1)+'" stroke="#9fb3c8" stroke-width="0.8"/>';} });
+    shapes.forEach(s=>{ if(s.t==='dim'){const a=s.pts[0],b=s.pts[1];svg+='<line x1="'+mx(a.x).toFixed(1)+'" y1="'+my(a.y).toFixed(1)+'" x2="'+mx(b.x).toFixed(1)+'" y2="'+my(b.y).toFixed(1)+'" stroke="#1E6FF4" stroke-width="1.1" marker-start="url(#ar)" marker-end="url(#ar)"/>';} });
+    shapes.forEach(s=>{ if(s.t==='text') svg+='<text x="'+(mx(s.p.x)+s.dx).toFixed(1)+'" y="'+(my(s.p.y)+s.dy).toFixed(1)+'" font-size="14" font-weight="700" fill="#1552c7" text-anchor="'+s.anchor+'" style="paint-order:stroke;stroke:#f8fafc;stroke-width:3.5px">'+s.txt+'</text>'; });
+    shapes.forEach(s=>{ if(s.t==='cap') svg+='<text x="'+(mx(s.p.x)+s.dx).toFixed(1)+'" y="'+(my(s.p.y)+s.dy).toFixed(1)+'" font-size="10" font-weight="600" fill="#a21caf" text-anchor="start" style="paint-order:stroke;stroke:#f8fafc;stroke-width:3px">'+s.txt+'</text>'; });
+    svgEl.innerHTML=svg;
   }
 
   /* ---------- construction: one table ----------
@@ -522,14 +725,15 @@
     return { bars, over };
   }
 
-  /* ---------- render results ---------- */
+  /* ---------- print view: the workshop document (materials, per-table cut lists and folds, sheets, tubes) ---------- */
   function recompute(){
-    if(!order){ $("results").innerHTML = ""; return; }
-    const per = order.tables.map((t, i) => computeTable(t, i));
+    if(!order){ CURRENT = null; PRICING = null; return; }
+    const o = order;
+    const per = o.tables.map((t, i) => computeTable(t, i));
     const sheetPieces = [], tubePieces = [];
     let feet = 0;
     per.forEach((r, i) => {
-      const q = order.tables[i].qty;
+      const q = o.tables[i].qty;
       feet += 4 * q;
       for(let k = 0; k < q; k++){
         r.sheets.forEach(p => sheetPieces.push(Object.assign({}, p, { label: q > 1 ? p.label.replace(/^М(\d+)/, "М$1." + (k + 1)) : p.label })));
@@ -537,35 +741,11 @@
       }
     });
 
-    const op = $("o-print");
-    if(op) op.innerHTML = 'Клиент: <b>' + esc(order.name || "—") + '</b> · Телефон: <b>' + esc(order.phone || "—") + '</b>';
-
-    // per-table cut lists, inside each table card
-    document.querySelectorAll(".tbl").forEach(card => {
-      const i = +card.dataset.i, r = per[i], q = order.tables[i].qty;
-      const t = order.tables[i];
-      card.querySelector(".printsum").innerHTML =
-        '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
-        ' · борд: ' + (t.splashOn ? t.splashH + ' мм' : 'НЕ') +
-        ' · задни крака от ръба: ' + t.legBack + ' мм' +
-        ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' : 'НЕ') +
-        ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
-        (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '');
-      let h = r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("");
-      h += '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
-        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
-        r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
-          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") +
-        '</tbody></table></div>';
-      h += '<h3>Схема на огъванията</h3><div class="schemes">' + r.schemes.map(foldSvg).join("") + '</div>';
-      card.querySelector(".cutout").innerHTML = h;
-    });
-
     const th = 1.5, s = 30, types = sheetTypes();
     // offcuts from the store go first; a confirmed order is shown against the store as it was before confirming
-    const key = orderKey(), done = INV.done[key];
-    const stock = (done ? INV.items.filter(o => !done.added.includes(o.id)).concat(done.used) : INV.items)
-      .filter(o => (+o.th || 1.5) === th);
+    const done = o.cut;
+    const stock = (done ? INV.items.filter(x => !done.added.includes(x.id)).concat(done.used) : INV.items)
+      .filter(x => (+x.th || 1.5) === th);
     const oc = useOffcuts(sheetPieces, stock, S.kerf);
     const nest = packMulti(oc.rest, types, S.kerf);
     // usable leftovers of every sheet and offcut, with the serial numbers they get when the cut is confirmed
@@ -575,19 +755,18 @@
       sh.left = leftovers(sh, S.kerf, S.offMin).map(l => {
         const id = done ? (done.added[k++] || "?") : serial(next++);
         const src = sh.type.offcut ? "от фира " + sh.type.offcut.id : "от лист " + sh.W + "×" + sh.H;
-        const o = Object.assign({ id, src }, l); created.push(o); return o;
+        const x = Object.assign({ id, src }, l); created.push(x); return x;
       });
     });
-    CURRENT = { key, used:oc.used.map(sh => sh.type.offcut), created };
+    CURRENT = { used:oc.used.map(sh => sh.type.offcut), created };
 
     const bars = packBars(tubePieces, S.tubeStock, S.kerf);
     const blankArea = sheetPieces.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6;
     const tubeM = tubePieces.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000;
     const kgPerM = (s*s - Math.pow(Math.max(0, s - 2*S.tubeWall), 2)) * 0.00793;
     const sheetKg = blankArea * th * 7.93, tubeKg = tubeM * kgPerM;
-    const nTables = order.tables.reduce((a, t) => a + t.qty, 0);
+    const nTables = o.tables.reduce((a, t) => a + t.qty, 0);
     const money = v => nest.priced ? "€ " + v.toFixed(2) : v.toFixed(2) + " м²";
-    const ids = list => list.length ? list.join(", ") : "—";
 
     /* ---- price of the order ----
        Our cost: whole sheets actually needed (offcuts are free) + tube sticks.
@@ -595,14 +774,20 @@
     const sheetCostOurs = nest.sheets.reduce((a, sh) => a + (sh.type.offcut ? 0 : (+sh.type.price || 0)), 0);
     const tubeCostOurs = bars.bars.length * (+S.tubePrice || 0);
     let weldOurs = 0, bendOurs = 0;
-    order.tables.forEach((t, i) => { const q = order.tables[i].qty, p = priceParts(t); weldOurs += p.weld*q; bendOurs += p.bend*q; });
-    const costMaterials = sheetCostOurs + tubeCostOurs;      // материали (себестойност)
-    const costTotal = costMaterials + weldOurs + bendOurs;   // пълна себестойност
-    const client = priceFor({ tables: order.tables });       // цена за клиента (с надценка)
-    PRICING = { client: client ? client.total : 0, costMaterials, weld: weldOurs, bend: bendOurs, costTotal };
-    renderProcessing();
+    o.tables.forEach(t => { const p = priceParts(t); weldOurs += p.weld * t.qty; bendOurs += p.bend * t.qty; });
+    const costMaterials = sheetCostOurs + tubeCostOurs;
+    const costTotal = costMaterials + weldOurs + bendOurs;
+    const client = priceFor({ tables:o.tables });
+    PRICING = { client:client ? client.total : 0, costMaterials, weld:weldOurs, bend:bendOurs, costTotal };
 
-    let h = '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
+    // head: who and what
+    const cr = fmtDT(o.created);
+    let h = '<div class="card"><h2>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Поръчка — чака потвърждение на разкроя") + '</h2>' +
+      '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b> · Маси: <b>' + nTables + '</b></div>' +
+      '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
+
+    // materials for the whole order
+    h += '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
     if(oc.used.length) h += tot("Фира от склада", oc.used.length + " бр.", oc.used.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + ")").join(", "));
     types.forEach(t => {
       const used = nest.sheets.filter(sh => sh.type.name === t.name);
@@ -612,11 +797,9 @@
     });
     if(!nest.sheets.length) h += tot("Нови листове " + th + " мм", "0 бр.", oc.used.length ? "всичко е от фира" : "няма детайли от лист");
     h += tot("Нова фира за склада", created.length + " бр.", created.length ? created.map(c => c.id + " (" + lw(c) + ")").join(", ") : "няма годни остатъци") +
-      tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.",
-          "общо " + tubeM.toFixed(2) + " м — само крака") +
+      tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.", "общо " + tubeM.toFixed(2) + " м — само крака") +
       tot(S.feet ? "Регулируеми крачета" : "Тапи за краката", feet + " бр.", "по 4 на маса") +
-      tot("Тегло на готовите маси (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг",
-          "лист " + Math.round(sheetKg) + " кг + тръба " + Math.round(tubeKg) + " кг") +
+      tot("Тегло на готовите маси (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг", "лист " + Math.round(sheetKg) + " кг + тръба " + Math.round(tubeKg) + " кг") +
       '</div>';
     if(nest.sheets.length && types.length > 1){
       h += '<div class="compare"><b>Нови листове — ' + (nest.priced ? 'цена' : 'площ') + ':</b> избрано ' + nest.sheets.length + ' бр., ' + money(nest.cost) +
@@ -627,14 +810,26 @@
       nest.over.map(p => esc(p.label) + ' ' + fmt(p.w) + '×' + fmt(p.h)).join(", ") + '</div>';
     if(bars.over.length) h += '<div class="warnbox">⚠ По-дълги от прът ' + S.tubeStock + ' мм: ' +
       bars.over.map(p => esc(p.label) + ' ' + fmt(p.len)).join(", ") + '</div>';
-    h += '<div class="commit noprint">' + (done
-      ? '<div class="donebox">✓ Разкроят е потвърден на ' + esc(new Date(done.at).toLocaleString("bg-BG")) + '. Взета от склада: ' +
-          esc(ids(done.used.map(u => u.id))) + ' · добавена: ' + esc(ids(done.added)) + '.</div>' +
-        '<button class="btn" id="undoCut" type="button">↶ Отмени потвърждението</button>'
-      : '<button class="btn primary" id="commitCut" type="button">✓ Потвърди разкроя — поръчката е нарязана</button>' +
-        '<div class="muted">Ще вземе от склада: ' + esc(ids(CURRENT.used.map(o => o.id))) + ' · ще добави: ' + esc(ids(created.map(c => c.id))) +
-        '. Номерата на новата фира са тези от чертежа — напишете ги върху парчетата.</div>') + '</div>';
     h += '</div>';
+
+    // one card per table: what it is, what to cut, how to fold
+    per.forEach((r, i) => {
+      const t = o.tables[i], q = t.qty;
+      h += '<div class="card"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
+        '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
+        ' · борд: ' + (t.splashOn ? t.splashH + ' мм' : 'НЕ') +
+        ' · задни крака от ръба: ' + t.legBack + ' мм' +
+        ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' : 'НЕ') +
+        ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
+        (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '') + '</div>' +
+        r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
+        '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
+        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
+          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") +
+        '</tbody></table></div>' +
+        '<h3>Схема на огъванията</h3><div class="schemes">' + r.schemes.map(foldSvg).join("") + '</div></div>';
+    });
 
     if(oc.used.length || nest.sheets.length){
       h += '<div class="card sheetscard"><h2>Разкрой на листовете</h2><div class="muted">Ориентировъчно разположение на заготовките (с ' + S.kerf +
@@ -649,9 +844,8 @@
           b.cuts.map(c => '<div class="seg" style="flex:0 0 ' + (c.len / S.tubeStock * 100) + '%" title="' + esc(c.label + ' ' + fmt(c.len)) + '">' + fmt(c.len) + '</div>').join("") +
           '</div></div>').join("") + '</div>';
     }
-    $("results").innerHTML = h;
-    const cb = $("commitCut"); if(cb) cb.addEventListener("click", commitCut);
-    const ub = $("undoCut"); if(ub) ub.addEventListener("click", undoCut);
+    $("printView").innerHTML = h;
+    renderBar();
   }
   function tot(k, v, d){ return '<div class="tot"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
   function sheetSvg(sh, title){
@@ -693,37 +887,6 @@
     catch(e){ stockMsg("⚠ Браузърът не позволява запазване — складът ще се загуби при затваряне. Свалете резервно копие.", "bad"); return false; }
   }
   function stockMsg(m, kind){ $("stockStatus").className = "status " + (kind || ""); $("stockStatus").textContent = m; }
-  // an order's identity: the same order loaded again is recognised as already cut
-  function orderKey(){
-    const s = JSON.stringify([order.name, order.phone, order.created, order.tables]);
-    let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
-    return "o" + h.toString(36) + s.length.toString(36);
-  }
-  const orderLabel = () => (order.source || "ръчна поръчка") + (order.name ? " · " + order.name : "");
-  function commitCut(){
-    if(!CURRENT || INV.done[CURRENT.key]) return;
-    const now = new Date().toISOString(), usedIds = CURRENT.used.map(o => o.id);
-    INV.items = INV.items.filter(o => !usedIds.includes(o.id));
-    const added = CURRENT.created.map(c => {
-      const id = serial(INV.next++);
-      INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:1.5, from:c.src + " · " + orderLabel(), added:now });
-      return id;
-    });
-    INV.done[CURRENT.key] = { at:now, label:orderLabel(), used:CURRENT.used.map(o => Object.assign({}, o)), added };
-    saveInv(); renderStock(); recompute();
-    stockMsg("✓ Разкроят е потвърден: взета фира " + (usedIds.join(", ") || "—") + "; добавена " + (added.join(", ") || "—") + ".", "ok");
-  }
-  function undoCut(){
-    const key = CURRENT && CURRENT.key, d = key && INV.done[key];
-    if(!d) return;
-    const gone = d.added.filter(id => !INV.items.some(o => o.id === id));
-    INV.items = INV.items.filter(o => !d.added.includes(o.id));
-    d.used.forEach(u => { if(!INV.items.some(o => o.id === u.id)) INV.items.push(u); });
-    delete INV.done[key];
-    saveInv(); renderStock(); recompute();
-    stockMsg(gone.length ? "⚠ Потвърждението е отменено, но " + gone.join(", ") + " вече не е в склада (използвана в друга поръчка или премахната)."
-                         : "↶ Потвърждението е отменено — складът е както преди поръчката.", gone.length ? "warn" : "ok");
-  }
   function renderStock(){
     const items = INV.items.slice().sort((a, b) => String(a.id).localeCompare(String(b.id)));
     $("stockList").innerHTML = items.length
@@ -767,7 +930,8 @@
       d.items.forEach(o => { if(o && o.id && +o.w > 0 && +o.h > 0 && !INV.items.some(x => x.id === o.id)){ INV.items.push(o); n++; } });
       Object.assign(INV.done, d.done || {});
       // pieces either copy says were cut stay out of the store
-      const cut = new Set(Object.values(INV.done).flatMap(x => (x.used || []).map(u => u.id)));
+      const cut = new Set(Object.values(INV.done).flatMap(x => (x.used || []).map(u => u.id))
+        .concat(ORD.orders.flatMap(o => o.cut ? o.cut.used.map(u => u.id) : [])));
       INV.items = INV.items.filter(o => !cut.has(o.id));
       const top = Math.max(0, ...INV.items.map(o => +String(o.id).replace(/\D/g, "") || 0));
       INV.next = Math.max(INV.next, +d.next || 1, top + 1);
@@ -775,17 +939,6 @@
       stockMsg("✓ Заредено копие: " + n + " нови парчета (общо " + INV.items.length + ").", "ok");
     }catch(e){ stockMsg("✕ Файлът не е резервно копие на склада.", "bad"); }
   });
-
-  /* ---------- orders archive ----------
-     Metadata lives in localStorage; the order PDFs live in IndexedDB (too big for localStorage).
-     Backup/restore carries both. Everything stays in this browser — nothing is uploaded. */
-  const ARCH_KEY="mpr-admin-orders-v1";
-  let ARCH=loadArch();
-  function loadArch(){ try{ const d=JSON.parse(localStorage.getItem(ARCH_KEY)||"null"); if(d&&Array.isArray(d.orders)) return {orders:d.orders, next:Math.max(1,+d.next||1)}; }catch(e){} return {orders:[], next:1}; }
-  function saveArch(){ try{ localStorage.setItem(ARCH_KEY,JSON.stringify(ARCH)); return true; }catch(e){ archMsg("⚠ Браузърът не позволява запазване — свалете резервно копие.","bad"); return false; } }
-  function archMsg(m,k){ const e=$("archStatus"); if(e){ e.className="status "+(k||""); e.textContent=m; } }
-  function eur(v){ return v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €"; }
-  const orderSerial = n => "№ " + String(n).padStart(4,"0");
 
   // IndexedDB document store (one PDF per order id)
   const DB_NAME="mpr-admin", DB_STORE="docs";
@@ -798,168 +951,286 @@
   function blobToB64(blob){ return new Promise((res,rej)=>{ const r=new FileReader(); r.onload=()=>res(String(r.result).split(",")[1]); r.onerror=rej; r.readAsDataURL(blob); }); }
   function b64ToBlob(b64,type){ const bin=atob(b64), u=new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) u[i]=bin.charCodeAt(i); return new Blob([u],{type:type||"application/pdf"}); }
 
-  async function saveToArchive(){
-    if(!order) return;
-    const id=(order.orderNo||"").trim() || orderKey();
-    const priceIn=$("arch-price")?$("arch-price").value.trim():"";
-    const P = PRICING || {};
-    const existing = ARCH.orders.find(o=>o.id===id);
-    const ser = existing && existing.serial ? existing.serial : ARCH.next++;  // пореден номер в админа
-    const rec={
-      id, serial:ser, orderNo:(order.orderNo||"").trim(), savedAt:new Date().toISOString(), created:order.created||"",
-      name:($("o-name")?$("o-name").value:order.name||"").trim(), phone:($("o-phone")?$("o-phone").value:order.phone||"").trim(),
-      price: priceIn!=="" ? +priceIn : null,                                   // продажна цена (ръчна)
-      clientPrice: P.client!=null ? P.client : null,                          // цена за клиента (авто)
-      cost: P.costTotal!=null ? P.costTotal : null,                           // себестойност общо
-      costMaterials: P.costMaterials!=null ? P.costMaterials : null,
-      place:($("arch-place")?$("arch-place").value:"").trim(), deliveryDate:$("arch-ddate")?$("arch-ddate").value:"",
-      source:order.source||"",
-      tables:order.tables.map(t=>({L:t.L,D:t.D,H:t.H,qty:t.qty,splashOn:t.splashOn,splashH:t.splashH,legBack:t.legBack,baseOn:t.baseOn,baseH:t.baseH,midOn:t.midOn,notes:t.notes})),
-      hasDoc:false, docName:""
-    };
-    if(order.doc&&order.doc.bytes){
-      try{ await docPut(id,new Blob([order.doc.bytes],{type:"application/pdf"}),order.doc.name); rec.hasDoc=true; rec.docName=order.doc.name; }
-      catch(e){ rec.hasDoc=false; }
-    }else{ const p=ARCH.orders.find(o=>o.id===id); if(p&&p.hasDoc){ rec.hasDoc=true; rec.docName=p.docName; } }
-    const i=ARCH.orders.findIndex(o=>o.id===id);
-    if(i>=0) ARCH.orders[i]=rec; else ARCH.orders.unshift(rec);
-    saveArch(); renderArchive(); renderProcessing();
-    const ps=$("procStatus"); if(ps){ ps.className="status ok"; ps.textContent="✓ Запазена в архива ("+orderSerial(rec.serial)+"). "+(rec.hasDoc?"Документът е прикачен.":"Без документ."); }
+  async function openDoc(id, onMsg){
+    const msg = onMsg || archMsg;
+    try{ const d = await docGet(id); if(!d){ msg("Документът липсва на това устройство."); return; }
+      const url = URL.createObjectURL(d.blob); const a = document.createElement("a"); a.href = url; a.download = d.name || ("poruchka-" + id + ".pdf");
+      document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    }catch(e){ msg("Грешка при отваряне на документа."); }
   }
-  function openArchived(id){
-    const o=ARCH.orders.find(x=>x.id===id); if(!o) return;
-    order={ name:o.name, phone:o.phone, created:o.created, source:o.orderNo?("Архив: "+o.orderNo):"Архив",
-      orderNo:o.orderNo, priceFromPdf:(o.price!=null?{total:o.price,currency:"€"}:null), doc:null,
-      archive:{ price:o.price!=null?o.price:"", place:o.place, deliveryDate:o.deliveryDate }, tables:o.tables.map(normTable) };
-    setStatus("Заредена от архива: "+orderSerial(o.serial)+". (Документът остава в архива — заредете PDF, за да го замените.)","ok");
-    renderOrder(); showPage("work");
+
+  /* ---------- bottom bar: prices + the buttons that move the order on ---------- */
+  function renderBar(){
+    const el = $("bottomBar");
+    if(!order){ el.innerHTML = ""; return; }
+    const o = order, P = PRICING || {}, proc = o.stage === "processing";
+    const diff = P.client != null && P.costTotal != null ? P.client - P.costTotal : null;
+    let h = '<h2>' + (proc ? 'Цена, доставка и архивиране' : 'Цена и потвърждение') + '</h2>' +
+      '<div class="pricebox procbox">' +
+        '<div class="big"><span>Цена за клиента</span><b>' + esc(eur2(P.client)) + '</b></div>' +
+        '<div><span>Себестойност материали</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
+        '<div><span>Заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
+        '<div><span>Огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
+        '<div><span>Себестойност общо</span><b>' + esc(eur2(P.costTotal)) + '</b></div>' +
+        '<div><span>Разлика (цена − себестойност)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
+      '</div>';
+    if(!proc){
+      const c = CURRENT || { used:[], created:[] };
+      h += '<div class="muted" style="margin-top:10px">При потвърждение поръчката получава <b>' + esc(orderSerial(o.serial || ORD.next)) + '</b> и отива в „В обработка“. ' +
+        'От склада се взема фира: <b>' + esc(idsTxt(c.used.map(x => x.id))) + '</b> · добавя се нова фира: <b>' + esc(idsTxt(c.created.map(x => x.id))) +
+        '</b>. Номерата на новата фира са тези от чертежа — напишете ги върху парчетата.</div>' +
+        '<div class="actions">' +
+          '<button class="btn" id="bPrint" type="button">Печат</button>' +
+          '<button class="btn cancel" id="bCancel" type="button">✕ Откажи поръчката</button>' +
+          '<button class="btn primary big" id="bConfirm" type="button">✓ Потвърди разкроя</button>' +
+        '</div>';
+    }else{
+      const d = o.cut;
+      h += (d ? '<div class="donebox" style="margin-top:10px">✓ Разкроят е потвърден на ' + esc(fmtDT(d.at)) + '. Взета от склада: ' +
+          esc(idsTxt(d.used.map(u => u.id))) + ' · добавена: ' + esc(idsTxt(d.added)) + '.</div>' : '') +
+        '<div class="grid" style="margin-top:12px">' +
+          '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="b-price" value="' + esc(o.price != null ? o.price : "") + '" placeholder="колко е продадена"></label>' +
+          '<label>Място на доставка<input type="text" id="b-place" value="' + esc(o.place || "") + '" placeholder="адрес или обект"></label>' +
+          '<label>Дата на доставка<input type="date" id="b-ddate" value="' + esc(o.deliveryDate || "") + '"></label>' +
+        '</div>' +
+        '<div class="actions">' +
+          '<button class="btn" id="bPrint" type="button">Печат</button>' +
+          '<button class="btn" id="bBack" type="button">↶ Върни в Разкрой</button>' +
+          '<button class="btn primary big" id="bArchive" type="button">Архивирай</button>' +
+        '</div>';
+    }
+    h += '<div class="status" id="barStatus"></div>';
+    el.innerHTML = h;
+    $("bPrint").addEventListener("click", () => window.print());
+    if(!proc){
+      $("bConfirm").addEventListener("click", confirmOrder);
+      const bc = $("bCancel");
+      bc.addEventListener("click", () => {
+        if(bc.dataset.armed !== "1"){ bc.dataset.armed = "1"; bc.textContent = "Сигурно? Поръчката ще бъде изтрита — натисни пак"; return; }
+        cancelOrder();
+      });
+    }else{
+      $("b-price").addEventListener("input", e => { const v = e.target.value.trim(); o.price = v === "" ? null : +v; saveSoon(); renderLists(); });
+      $("b-place").addEventListener("input", e => { o.place = e.target.value; saveSoon(); renderLists(); });
+      $("b-ddate").addEventListener("input", e => { o.deliveryDate = e.target.value; saveSoon(); renderLists(); });
+      $("bBack").addEventListener("click", backToWork);
+      $("bArchive").addEventListener("click", archiveOrder);
+    }
   }
-  async function openDoc(id){
-    try{ const d=await docGet(id); if(!d){ archMsg("Документът липсва на това устройство.","warn"); return; }
-      const url=URL.createObjectURL(d.blob); const a=document.createElement("a"); a.href=url; a.download=d.name||("poruchka-"+id+".pdf");
-      document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
-    }catch(e){ archMsg("Грешка при отваряне на документа.","bad"); }
+  function snapPrices(o){
+    const P = PRICING;
+    if(P){ o.clientPrice = P.client; o.cost = P.costTotal; o.costMaterials = P.costMaterials; o.weld = P.weld; o.bend = P.bend; }
   }
-  async function removeArchived(id){
-    ARCH.orders=ARCH.orders.filter(o=>o.id!==id); saveArch(); try{ await docDel(id); }catch(e){}
-    renderArchive(); archMsg("Премахната от архива.","");
+
+  // Разкрой → В обработка: takes the offcuts from the store, adds the new ones, gives the order its number
+  function confirmOrder(){
+    const o = order;
+    if(!o || o.stage !== "new" || !CURRENT) return;
+    const now = new Date().toISOString(), usedIds = CURRENT.used.map(x => x.id);
+    if(!o.serial) o.serial = ORD.next++;
+    const label = orderSerial(o.serial) + (o.name ? " · " + o.name : "");
+    INV.items = INV.items.filter(x => !usedIds.includes(x.id));
+    const added = CURRENT.created.map(c => {
+      const id = serial(INV.next++);
+      INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:1.5, from:c.src + " · " + label, added:now });
+      return id;
+    });
+    o.cut = { at:now, used:CURRENT.used.map(x => Object.assign({}, x)), added };
+    snapPrices(o);
+    o.stage = "processing"; o.confirmedAt = now; delete o.noData;
+    saveInv(); saveOrders(); renderStock();
+    SEL.work = null; TAB = "print";
+    showPage("work");
+    setStatus("✓ " + label + " — разкроят е потвърден и поръчката е преместена в „В обработка“. Взета фира: " + idsTxt(usedIds) + " · добавена: " + idsTxt(added) + ".", "ok");
   }
+  // Разкрой: the order is dropped together with its document
+  async function cancelOrder(){
+    const o = order;
+    if(!o || o.stage !== "new") return;
+    ORD.orders = ORD.orders.filter(x => x.id !== o.id);
+    saveOrders();
+    if(o.hasDoc){ try{ await docDel(o.id); }catch(e){} }
+    SEL.work = null;
+    showPage("work");
+    setStatus("Поръчката" + (o.name ? " на " + o.name : "") + " е отказана и премахната.", "");
+  }
+  // В обработка → Разкрой: undoes the cut, the store goes back to how it was before confirming
+  function backToWork(){
+    const o = order;
+    if(!o || o.stage !== "processing") return;
+    let gone = [];
+    if(o.cut){
+      gone = o.cut.added.filter(id => !INV.items.some(x => x.id === id));
+      INV.items = INV.items.filter(x => !o.cut.added.includes(x.id));
+      o.cut.used.forEach(u => { if(!INV.items.some(x => x.id === u.id)) INV.items.push(u); });
+      o.cut = null;
+    }
+    o.stage = "new"; o.confirmedAt = null;
+    saveInv(); saveOrders(); renderStock();
+    SEL.processing = null; SEL.work = o.id; TAB = "edit";
+    showPage("work");
+    setStatus(gone.length ? "⚠ " + serTxt(o) + " е върната в Разкрой, но " + gone.join(", ") + " вече не е в склада (използвана в друга поръчка или премахната)."
+                          : "↶ " + serTxt(o) + " е върната в Разкрой — складът е както преди потвърждението. Редактирайте и потвърдете отново.", gone.length ? "warn" : "ok");
+  }
+  // В обработка → Архив
+  function archiveOrder(){
+    const o = order;
+    if(!o || o.stage !== "processing") return;
+    snapPrices(o);
+    const now = new Date().toISOString();
+    o.stage = "archived"; o.archivedAt = now; o.savedAt = now;
+    saveOrders();
+    SEL.processing = null;
+    showPage("processing");
+    procMsg("✓ " + serTxt(o) + (o.name ? " (" + o.name + ")" : "") + " е архивирана.", "ok");
+  }
+
+  /* ---------- lists: Разкрой (waiting) and В обработка (being made) ---------- */
+  function renderLists(){
+    const w = byStage("new").sort((a, b) => (a.addedAt || "").localeCompare(b.addedAt || ""));
+    const p = byStage("processing").sort((a, b) => (+a.serial || 0) - (+b.serial || 0));
+    $("cntWork").textContent = w.length ? w.length : "";
+    $("cntProc").textContent = p.length ? p.length : "";
+    $("workCount").textContent = w.length ? "(" + w.length + ")" : "";
+    $("procCount").textContent = p.length ? "(" + p.length + ")" : "";
+    const openBtn = (id, sel) => '<button class="btn small" data-open="' + esc(id) + '" type="button">' + (sel ? "Затвори" : "Отвори") + '</button>';
+    $("workList").innerHTML = w.length
+      ? '<div class="tw"><table class="cut list"><thead><tr><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Заредена</th><th>Файл</th><th></th></tr></thead><tbody>' +
+        w.map(o => '<tr class="' + (SEL.work === o.id ? "sel" : "") + '" data-row="' + esc(o.id) + '">' +
+          '<td><b>' + esc(o.name || "без име") + '</b>' + (o.serial ? ' <span class="muted">' + esc(orderSerial(o.serial)) + '</span>' : '') + '</td>' +
+          '<td>' + esc(o.phone || "—") + '</td><td class="q">' + nTablesOf(o) + '</td>' +
+          '<td class="size">' + esc(eur2(clientPriceOf(o))) + '</td><td>' + esc(fmtDT(o.addedAt)) + '</td>' +
+          '<td class="muted">' + esc(o.source || "ръчно") + '</td><td>' + openBtn(o.id, SEL.work === o.id) + '</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="empty">Няма чакащи поръчки. Заредете PDF отгоре — може няколко наведнъж.</div>';
+    $("procList").innerHTML = p.length
+      ? '<div class="tw"><table class="cut list"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Продажна</th><th>Доставка</th><th>Потвърдена</th><th></th></tr></thead><tbody>' +
+        p.map(o => '<tr class="' + (SEL.processing === o.id ? "sel" : "") + '" data-row="' + esc(o.id) + '">' +
+          '<td class="size">' + esc(serTxt(o)) + '</td><td><b>' + esc(o.name || "без име") + '</b></td><td>' + esc(o.phone || "—") + '</td>' +
+          '<td class="q">' + nTablesOf(o) + '</td><td class="size">' + esc(eur2(o.clientPrice != null ? o.clientPrice : clientPriceOf(o))) + '</td>' +
+          '<td class="size">' + esc(eur2(o.price)) + '</td>' +
+          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + '</td>' +
+          '<td>' + esc(fmtDate(o.confirmedAt)) + '</td><td>' + openBtn(o.id, SEL.processing === o.id) + '</td></tr>').join("") +
+        '</tbody></table></div>'
+      : '<div class="empty">Няма поръчки в обработка. Поръчка идва тук, когато потвърдите разкроя ѝ в „Разкрой“.</div>';
+    [["workList", "work"], ["procList", "processing"]].forEach(([el, page]) => {
+      $(el).querySelectorAll("[data-row]").forEach(tr => tr.addEventListener("click", e => {
+        if(e.target.closest("input,a")) return;
+        const id = tr.dataset.row, close = SEL[page] === id;
+        SEL[page] = close ? null : id;
+        if(!close){ const rec = findOrder(id); TAB = rec && rec.noData ? "edit" : "print"; }
+        openViewer(); renderLists();
+        if(!close) $("viewer").scrollIntoView({ behavior:"smooth", block:"start" });
+      }));
+    });
+  }
+
+  /* ---------- archive: finished orders ---------- */
+  function archMsg(m, k){ const e = $("archStatus"); if(e){ e.className = "status " + (k || ""); e.textContent = m; } }
   function renderArchive(){
-    const q=($("archSearch").value||"").toLowerCase().trim();
-    let list=ARCH.orders.slice().sort((a,b)=>(b.savedAt||"").localeCompare(a.savedAt||""));
-    if(q) list=list.filter(o=>((o.serial?orderSerial(o.serial):"")+" "+(o.orderNo||"")+" "+(o.name||"")+" "+(o.phone||"")+" "+(o.place||"")).toLowerCase().includes(q));
+    const q = ($("archSearch").value || "").toLowerCase().trim();
+    const all = byStage("archived");
+    let list = all.slice().sort((a, b) => (b.archivedAt || b.savedAt || "").localeCompare(a.archivedAt || a.savedAt || ""));
+    if(q) list = list.filter(o => ((o.serial ? orderSerial(o.serial) : "") + " " + (o.orderNo || "") + " " + (o.name || "") + " " + (o.phone || "") + " " + (o.place || "")).toLowerCase().includes(q));
     $("archiveList").innerHTML = list.length
-      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Запазена</th><th>Маси</th><th>Клиентска цена</th><th>Себестойност</th><th>Продажна</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>'+
-        list.map(o=>'<tr>'+
-          '<td class="size">'+esc(o.serial?orderSerial(o.serial):"—")+'</td>'+
-          '<td>'+esc(o.name||"—")+'</td>'+
-          '<td>'+esc(o.phone||"—")+'</td>'+
-          '<td>'+esc(o.savedAt?new Date(o.savedAt).toLocaleDateString("bg-BG"):"")+'</td>'+
-          '<td class="q">'+o.tables.reduce((a,t)=>a+(t.qty||1),0)+'</td>'+
-          '<td class="size">'+esc(eur(o.clientPrice))+'</td>'+
-          '<td class="size">'+esc(eur(o.cost))+'</td>'+
-          '<td class="size">'+esc(eur(o.price))+'</td>'+
-          '<td>'+esc(o.place||"—")+(o.deliveryDate?' · '+esc(o.deliveryDate):"")+'</td>'+
-          '<td>'+(o.hasDoc?'<button class="btn" data-doc="'+esc(o.id)+'" type="button">Отвори</button>':'—')+'</td>'+
-          '<td style="white-space:nowrap"><button class="btn" data-open="'+esc(o.id)+'" type="button">Зареди</button> <button class="btn danger" data-rm="'+esc(o.id)+'" type="button">Премахни</button></td>'+
-        '</tr>').join("")+'</tbody></table></div>'+
-        '<div class="muted" style="margin-top:6px">'+list.length+(q?' от '+ARCH.orders.length:'')+(ARCH.orders.length===1?' поръчка':' поръчки')+'</div>'
-      : '<div class="empty">'+(ARCH.orders.length?"Няма съвпадения.":"Архивът е празен. Заредете поръчка и натиснете „Запази в архива“.")+'</div>';
-    $("archiveList").querySelectorAll("[data-doc]").forEach(b=>b.addEventListener("click",()=>openDoc(b.dataset.doc)));
-    $("archiveList").querySelectorAll("[data-open]").forEach(b=>b.addEventListener("click",()=>openArchived(b.dataset.open)));
-    $("archiveList").querySelectorAll("[data-rm]").forEach(b=>b.addEventListener("click",()=>{
-      if(b.dataset.armed!=="1"){ b.dataset.armed="1"; b.textContent="Сигурно? Натисни пак"; return; } removeArchived(b.dataset.rm);
+      ? '<div class="tw"><table class="cut arch"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Архивирана</th><th>Маси</th><th>Клиентска цена</th><th>Себестойност</th><th>Продажна</th><th>Доставка</th><th>Документ</th><th></th></tr></thead><tbody>' +
+        list.map(o => '<tr>' +
+          '<td class="size">' + esc(serTxt(o)) + '</td>' +
+          '<td>' + esc(o.name || "—") + '</td>' +
+          '<td>' + esc(o.phone || "—") + '</td>' +
+          '<td>' + esc(fmtDate(o.archivedAt || o.savedAt)) + '</td>' +
+          '<td class="q">' + nTablesOf(o) + '</td>' +
+          '<td class="size">' + esc(eur2(o.clientPrice)) + '</td>' +
+          '<td class="size">' + esc(eur2(o.cost)) + '</td>' +
+          '<td class="size">' + esc(eur2(o.price)) + '</td>' +
+          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : "") + '</td>' +
+          '<td>' + (o.hasDoc ? '<button class="btn small" data-doc="' + esc(o.id) + '" type="button">Отвори</button>' : '—') + '</td>' +
+          '<td class="acts"><button class="btn small" data-back="' + esc(o.id) + '" type="button" title="Връща поръчката в „В обработка“">↶ В обработка</button> ' +
+          '<button class="btn small" data-copy="' + esc(o.id) + '" type="button" title="Нова поръчка в „Разкрой“ със същите маси">Копие в Разкрой</button> ' +
+          '<button class="btn danger" data-rm="' + esc(o.id) + '" type="button">Премахни</button></td>' +
+        '</tr>').join("") + '</tbody></table></div>' +
+        '<div class="muted" style="margin-top:6px">' + list.length + (q ? ' от ' + all.length : '') + (all.length === 1 ? ' поръчка' : ' поръчки') + '</div>'
+      : '<div class="empty">' + (all.length ? "Няма съвпадения." : "Архивът е празен. Поръчка идва тук, когато натиснете „Архивирай“ в „В обработка“.") + '</div>';
+    $("archiveList").querySelectorAll("[data-doc]").forEach(b => b.addEventListener("click", () => openDoc(b.dataset.doc)));
+    $("archiveList").querySelectorAll("[data-back]").forEach(b => b.addEventListener("click", () => {
+      const o = findOrder(b.dataset.back); if(!o) return;
+      o.stage = "processing"; o.archivedAt = null; saveOrders(); renderArchive(); renderLists();
+      archMsg("↶ " + serTxt(o) + " е върната в „В обработка“.", "ok");
+    }));
+    $("archiveList").querySelectorAll("[data-copy]").forEach(b => b.addEventListener("click", () => {
+      const o = findOrder(b.dataset.copy); if(!o) return;
+      const rec = makeRecord({ name:o.name, phone:o.phone, tables:o.tables }, "копие на " + serTxt(o));
+      ORD.orders.push(rec); saveOrders();
+      SEL.work = rec.id; TAB = "edit"; showPage("work");
+      setStatus("Копие на " + serTxt(o) + " е добавено в Разкрой — проверете размерите и потвърдете разкроя.", "ok");
+    }));
+    $("archiveList").querySelectorAll("[data-rm]").forEach(b => b.addEventListener("click", async () => {
+      if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Сигурно? Натисни пак"; return; }
+      const o = findOrder(b.dataset.rm);
+      ORD.orders = ORD.orders.filter(x => x.id !== b.dataset.rm); saveOrders();
+      if(o && o.hasDoc){ try{ await docDel(o.id); }catch(e){} }
+      renderArchive(); archMsg("Премахната от архива.", "");
     }));
   }
   $("archSearch").addEventListener("input", renderArchive);
-  $("archExport").addEventListener("click", async ()=>{
-    archMsg("Подготвям копие с документите...","");
-    const out={ kind:"mpr-orders", v:1, saved:new Date().toISOString(), next:ARCH.next, orders:[] };
-    for(const o of ARCH.orders){ const rec=Object.assign({},o);
-      if(o.hasDoc){ try{ const d=await docGet(o.id); if(d){ rec.doc=await blobToB64(d.blob); rec.docName=d.name; } }catch(e){} }
+
+  // backup of every order (Разкрой, В обработка, Архив) with the documents
+  $("archExport").addEventListener("click", async () => {
+    saveOrders();
+    archMsg("Подготвям копие с документите...", "");
+    const out = { kind:"mpr-orders", v:2, saved:new Date().toISOString(), next:ORD.next, orders:[] };
+    for(const o of ORD.orders){
+      const rec = Object.assign({}, o);
+      if(o.hasDoc){ try{ const d = await docGet(o.id); if(d){ rec.doc = await blobToB64(d.blob); rec.docName = d.name; } }catch(e){} }
       out.orders.push(rec);
     }
-    const url=URL.createObjectURL(new Blob([JSON.stringify(out)],{type:"application/json"}));
-    const a=document.createElement("a"); a.href=url; a.download="arhiv-poruchki-"+new Date().toISOString().slice(0,10)+".json";
-    document.body.appendChild(a); a.click(); a.remove(); setTimeout(()=>URL.revokeObjectURL(url),4000);
-    archMsg("⬇ Резервното копие е свалено ("+ARCH.orders.length+" поръчки).","ok");
+    const url = URL.createObjectURL(new Blob([JSON.stringify(out)], { type:"application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "arhiv-poruchki-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    archMsg("⬇ Резервното копие е свалено (" + ORD.orders.length + " поръчки).", "ok");
   });
-  $("archImport").addEventListener("click", ()=>$("archImportFile").click());
-  $("archImportFile").addEventListener("change", async ()=>{
-    const f=$("archImportFile").files[0]; $("archImportFile").value=""; if(!f) return;
-    try{ const d=JSON.parse(await f.text()); if(!d||!Array.isArray(d.orders)) throw new Error("bad");
-      let n=0;
-      for(const o of d.orders){ if(!o||!o.id) continue;
-        if(o.doc){ try{ await docPut(o.id,b64ToBlob(o.doc,"application/pdf"),o.docName||o.id+".pdf"); o.hasDoc=true; }catch(e){} delete o.doc; }
-        const i=ARCH.orders.findIndex(x=>x.id===o.id); if(i>=0) ARCH.orders[i]=o; else ARCH.orders.push(o); n++;
+  $("archImport").addEventListener("click", () => $("archImportFile").click());
+  $("archImportFile").addEventListener("change", async () => {
+    const f = $("archImportFile").files[0]; $("archImportFile").value = ""; if(!f) return;
+    try{
+      const d = JSON.parse(await f.text());
+      if(!d || !Array.isArray(d.orders)) throw new Error("bad");
+      let n = 0;
+      for(const o of d.orders){
+        if(!o || !o.id || !Array.isArray(o.tables)) continue;
+        if(!STAGES[o.stage]){ o.stage = "archived"; o.archivedAt = o.archivedAt || o.savedAt || ""; }   // copies made before the stages
+        if(o.doc){ try{ await docPut(o.id, b64ToBlob(o.doc, "application/pdf"), o.docName || o.id + ".pdf"); o.hasDoc = true; }catch(e){} delete o.doc; }
+        const i = ORD.orders.findIndex(x => x.id === o.id);
+        if(i >= 0) ORD.orders[i] = o; else ORD.orders.push(o);
+        n++;
       }
-      const top=Math.max(0,...ARCH.orders.map(o=>+o.serial||0));
-      ARCH.next=Math.max(ARCH.next,+d.next||1,top+1);
-      saveArch(); renderArchive(); archMsg("✓ Заредени "+n+" поръчки от копието (общо "+ARCH.orders.length+").","ok");
-    }catch(e){ archMsg("✕ Файлът не е резервно копие на архива.","bad"); }
+      const top = Math.max(0, ...ORD.orders.map(o => +o.serial || 0));
+      ORD.next = Math.max(ORD.next, +d.next || 1, top + 1);
+      saveOrders(); renderArchive(); renderLists();
+      archMsg("✓ Заредени " + n + " поръчки от копието (общо " + ORD.orders.length + ").", "ok");
+    }catch(e){ archMsg("✕ Файлът не е резервно копие на поръчките.", "bad"); }
   });
-
-  /* ---------- В обработка (delivery + sold price for the loaded order) ---------- */
-  function renderProcessing(){
-    const el=$("processing"); if(!el) return;
-    if(!order){ el.innerHTML='<div class="empty">Няма заредена поръчка. Заредете от страница „Разкрой“.</div>'; return; }
-    const aid=(order.orderNo||"").trim()||orderKey();
-    const prev=ARCH.orders.find(o=>o.id===aid);
-    const a=order.archive||{};
-    const pfPrice=(a.price!=null&&a.price!=="")?a.price:(prev?prev.price:"");
-    const pfPlace=(a.place!=null?a.place:(prev?prev.place:""))||"";
-    const pfDate =(a.deliveryDate!=null?a.deliveryDate:(prev?prev.deliveryDate:""))||"";
-    const P=PRICING||{};
-    const serTxt=prev?orderSerial(prev.serial):("ще получи "+orderSerial(ARCH.next));
-    const docNote=order.doc?("Документ за прикачане: "+esc(order.doc.name)):(prev&&prev.hasDoc?("Запазен документ: "+esc(prev.docName||"PDF")):"Без документ — заредете PDF на поръчката, за да се запази.");
-    el.innerHTML=
-      '<div class="muted"><b>'+esc(serTxt)+'</b> · '+esc(order.name||"—")+' · '+esc(order.phone||"—")+(order.orderNo?' · клиентски №: '+esc(order.orderNo):'')+'</div>'+
-      '<div class="pricebox procbox" style="margin-top:10px">'+
-        '<div class="big"><span>Цена за клиента</span><b>'+esc(eur2(P.client))+'</b></div>'+
-        '<div><span>Себестойност материали</span><b>'+esc(eur2(P.costMaterials))+'</b></div>'+
-        '<div><span>Заварки</span><b>'+esc(eur2(P.weld))+'</b></div>'+
-        '<div><span>Огъвания</span><b>'+esc(eur2(P.bend))+'</b></div>'+
-        '<div><span>Себестойност общо</span><b>'+esc(eur2(P.costTotal))+'</b></div>'+
-      '</div>'+
-      '<div class="grid" style="margin-top:12px">'+
-        '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="arch-price" value="'+esc(pfPrice)+'" placeholder="колко е продадена"></label>'+
-        '<label>Място на доставка<input type="text" id="arch-place" value="'+esc(pfPlace)+'" placeholder="адрес или обект"></label>'+
-        '<label>Дата на доставка<input type="date" id="arch-ddate" value="'+esc(pfDate)+'"></label>'+
-      '</div>'+
-      '<div class="row"><button class="btn primary" id="archSave" type="button">'+(prev?'Обнови в архива':'Запази в архива')+'</button></div>'+
-      '<div class="muted" style="margin-top:6px">'+docNote+'</div>'+
-      '<div class="status" id="procStatus"></div>';
-    $("arch-price").addEventListener("input", e=>{ (order.archive=order.archive||{}).price=e.target.value; });
-    $("arch-place").addEventListener("input", e=>{ (order.archive=order.archive||{}).place=e.target.value; });
-    $("arch-ddate").addEventListener("input", e=>{ (order.archive=order.archive||{}).deliveryDate=e.target.value; });
-    $("archSave").addEventListener("click", saveToArchive);
-  }
 
   /* ---------- burger menu / pages ---------- */
-  const PAGES={ work:"Разкрой", processing:"В обработка", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
-  function closeMenu(){ $("menu").hidden=true; $("menubg").hidden=true; }
+  const PAGES = { work:"Разкрой", processing:"В обработка", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
+  function closeMenu(){ $("menu").hidden = true; $("menubg").hidden = true; }
   function showPage(name){
-    if(!PAGES[name]) name="work";
-    document.querySelectorAll(".page").forEach(s=>{ s.hidden = s.dataset.page!==name; });
-    $("pageName").textContent=PAGES[name];
-    document.querySelectorAll(".menuItem").forEach(b=>b.classList.toggle("active", b.dataset.go===name));
+    if(!PAGES[name]) name = "work";
+    PAGE = name;
+    document.querySelectorAll(".page").forEach(s => { s.hidden = s.dataset.page !== name; });
+    $("pageName").textContent = PAGES[name];
+    document.querySelectorAll(".menuItem").forEach(b => b.classList.toggle("active", b.dataset.go === name));
     closeMenu();
-    if(name==="processing") renderProcessing();
-    if(name==="archive") renderArchive();
-    if(name==="stock") renderStock();
-    window.scrollTo({top:0});
+    renderLists();
+    openViewer();
+    if(name === "archive") renderArchive();
+    if(name === "stock") renderStock();
+    window.scrollTo({ top:0 });
   }
-  $("burger").addEventListener("click", ()=>{ const open=!$("menu").hidden; if(open) closeMenu(); else { $("menu").hidden=false; $("menubg").hidden=false; } });
+  $("burger").addEventListener("click", () => { const open = !$("menu").hidden; if(open) closeMenu(); else { $("menu").hidden = false; $("menubg").hidden = false; } });
   $("menubg").addEventListener("click", closeMenu);
-  document.querySelectorAll(".menuItem").forEach(b=>b.addEventListener("click", ()=>showPage(b.dataset.go)));
-
-  /* ---------- clear the loaded order ---------- */
-  $("clearOrder").addEventListener("click", ()=>{
-    order=null; renderOrder(); $("results").innerHTML=""; setStatus("",""); renderProcessing();
-  });
+  document.querySelectorAll(".menuItem").forEach(b => b.addEventListener("click", () => showPage(b.dataset.go)));
 
   renderStock();
-  renderArchive();
   buildSettings();
-  renderOrder();
   showPage("work");
