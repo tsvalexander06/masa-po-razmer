@@ -66,7 +66,10 @@
 
   /* ---------- order data ---------- */
   const TABLE_DEFAULT = { qty:1, L:1200, D:600, H:850, thickness:1.5, legProfile:30, splashOn:true, splashH:100,
-                          legBack:70, baseOn:true, baseH:150, midOn:false, notes:"" };
+                          legBack:70, baseOn:true, baseH:150, midOn:false, notes:"",
+                          topEdge:0, shelfEdge:0 };   // челни дъски за тази маса; 0 = от „Настройки“
+  const edgeTop = t => +t.topEdge > 0 ? +t.topEdge : S.topEdge;
+  const edgeShelf = t => +t.shelfEdge > 0 ? +t.shelfEdge : S.shelfEdge;
   function normTable(t){
     const n = Object.assign({}, TABLE_DEFAULT);
     for(const k in TABLE_DEFAULT){
@@ -93,7 +96,8 @@
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   function pBlankM2(t){
-    const P=PRICE, ft=P.topEdge+P.topReturn-P.stretch-P.topCut/2, fs=P.shelfEdge+P.shelfReturn-P.stretch-P.shelfCut/2;
+    const P=PRICE, eT=+t.topEdge>0?+t.topEdge:P.topEdge, eS=+t.shelfEdge>0?+t.shelfEdge:P.shelfEdge;
+    const ft=eT+P.topReturn-P.stretch-P.topCut/2, fs=eS+P.shelfReturn-P.stretch-P.shelfCut/2;
     const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
     const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
@@ -293,6 +297,7 @@
   const FIELDS = [
     ["qty","Брой еднакви маси","бр."], ["L","Дължина","мм"], ["D","Дълбочина","мм"], ["H","Височина","мм"],
     ["legBack","Задни крака от ръба","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
+    ["topEdge","Челна дъска — работен плот","мм"], ["shelfEdge","Челна дъска — долни плотове","мм"],
   ];
   function renderEdit(){
     const o = order, ro = o.stage !== "new", dis = ro ? " disabled" : "";
@@ -305,12 +310,12 @@
         (o.tables.length > 1 && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
         '<div class="tgrid"><div class="drawbox"><svg class="draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
         '<div><div class="grid">' +
-        FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
+        FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(k === "topEdge" ? edgeTop(t) : k === "shelfEdge" ? edgeShelf(t) : t[k]) + '"' + dis + '></label>').join("") +
         '</div><div class="chks">' +
         '<label class="chk"><input type="checkbox" data-k="splashOn"' + (t.splashOn ? " checked" : "") + dis + '> Борд</label>' +
         '<label class="chk"><input type="checkbox" data-k="baseOn"' + (t.baseOn ? " checked" : "") + dis + '> Долна основа (плот)</label>' +
         '<label class="chk"><input type="checkbox" data-k="midOn"' + (t.midOn ? " checked" : "") + dis + '> Втори междинен плот <span class="u mid2info"></span></label>' +
-        '</div><div class="muted" style="margin-top:6px">Ламарина 1.5 мм · профил на краката 30×30 мм</div>' +
+        '</div><div class="muted" style="margin-top:6px">Ламарина 1.5 мм · профил на краката 30×30 мм · челните дъски са само за тази маса (празно = от „Настройки“: ' + S.topEdge + ' / ' + S.shelfEdge + ' мм)</div>' +
         '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes"' + dis + '>' + esc(t.notes) + '</textarea></label></div></div></div>';
     });
     if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
@@ -346,7 +351,7 @@
   function drawTable(i){
     const card = document.querySelector('#order .tbl[data-i="' + i + '"]'); if(!card) return;
     const t = order.tables[i];
-    drawBlueprint(Object.assign({}, t, { mid2H:mid2H(t) }), card.querySelector(".draw"));
+    drawBlueprint(Object.assign({}, t, { mid2H:mid2H(t), topEdge:edgeTop(t), shelfEdge:edgeShelf(t) }), card.querySelector(".draw"));
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
   }
 
@@ -360,7 +365,7 @@
     const legProfile=v.legProfile||30;
 
     const w=realL/1000, d=realD/1000, h=realH/1000;
-    const tt=0.04, lg=legProfile/1000, st=0.03;
+    const tt=Math.max(0.015,((+v.topEdge||PRICE.topEdge)+10)/1000), lg=legProfile/1000, st=0.03, sth=Math.max(0.012,((+v.shelfEdge||PRICE.shelfEdge)+10)/1000);
     const legH=h-tt;
 
     const P=(x,y,z)=>({x:(x-z)*0.866, y:(x+z)*0.5 - y});
@@ -378,7 +383,7 @@
     const lxL=0.03, lxR=w-0.03-lg, frontZ=d-0.03-lg;
     const gw=PRICE.shelfGapW/2000;
     const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=gw, baseX1=w-gw;
-    const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, st, baseZ1-baseZ0, B2,B2F,B2R);
+    const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, sth, baseZ1-baseZ0, B2,B2F,B2R);
 
     shapes.push({t:'shadow',pts:[P(-0.03,0,-0.03),P(w+0.03,0,-0.03),P(w+0.03,0,d+0.03),P(-0.03,0,d+0.03)]});
     box(lxL,0,backZ,lg,legH,lg,TOP,FRONT,RIGHT);
@@ -448,7 +453,7 @@
      Legs: 30×30 tube, welded straight to the folded edges of the top and shelves — no frame rails (царги). */
   function computeTable(t, idx){
     const s = t.legProfile || 30, th = t.thickness || 1.5;
-    const E = S.topEdge, R = S.topReturn, F = S.shelfEdge, Rs = S.shelfReturn, I = S.legInset, cT = S.topCut / 2, cS = S.shelfCut / 2, st = S.stretch;
+    const E = edgeTop(t), R = S.topReturn, F = edgeShelf(t), Rs = S.shelfReturn, I = S.legInset, cT = S.topCut / 2, cS = S.shelfCut / 2, st = S.stretch;
     const tag = "М" + (idx + 1);
     const rows = [], sheets = [], tubes = [], warns = [], schemes = [];
     const sheetMat = "Лист инокс " + th + " мм", tubeMat = "Тръба " + s + "×" + s;
@@ -838,6 +843,7 @@
         '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
         ' · борд: ' + (t.splashOn ? t.splashH + ' мм' : 'НЕ') +
         ' · задни крака от ръба: ' + t.legBack + ' мм' +
+        ' · челна дъска: плот ' + edgeTop(t) + ' мм' + (t.baseOn || t.midOn ? ', долни плотове ' + edgeShelf(t) + ' мм' : '') +
         ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' : 'НЕ') +
         ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
         (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '') + '</div>' +

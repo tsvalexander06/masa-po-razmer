@@ -130,7 +130,7 @@
     const legProfile=v.legProfile||30;
 
     const w=realL/1000, d=realD/1000, h=realH/1000;
-    const tt=0.04, lg=legProfile/1000, st=0.03;
+    const tt=Math.max(0.015,((+v.topEdge||PRICE.topEdge)+10)/1000), lg=legProfile/1000, st=0.03, sth=Math.max(0.012,((+v.shelfEdge||PRICE.shelfEdge)+10)/1000);
     const legH=h-tt;
 
     const P=(x,y,z)=>({x:(x-z)*0.866, y:(x+z)*0.5 - y});
@@ -148,7 +148,7 @@
     const lxL=0.03, lxR=w-0.03-lg, frontZ=d-0.03-lg;
     const gw=PRICE.shelfGapW/2000;  // половината намаление на ширина от всяка страна
     const baseZ0=backZ, baseZ1=d-PRICE.shelfGap/1000, baseX0=gw, baseX1=w-gw;  // долен плот: наравно с краката по ширина, по-малък отзад+shelfGap
-    const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, st, baseZ1-baseZ0, B2,B2F,B2R);
+    const shelf=(yy)=>box(baseX0,yy,baseZ0, baseX1-baseX0, sth, baseZ1-baseZ0, B2,B2F,B2R);
 
     shapes.push({t:'shadow',pts:[P(-0.03,0,-0.03),P(w+0.03,0,-0.03),P(w+0.03,0,d+0.03),P(-0.03,0,d+0.03)]});
     box(lxL,0,backZ,lg,legH,lg,TOP,FRONT,RIGHT);
@@ -477,7 +477,8 @@
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   function pBlankM2(t){
-    const P=PRICE, ft=P.topEdge+P.topReturn-P.stretch-P.topCut/2, fs=P.shelfEdge+P.shelfReturn-P.stretch-P.shelfCut/2;
+    const P=PRICE, eT=+t.topEdge>0?+t.topEdge:P.topEdge, eS=+t.shelfEdge>0?+t.shelfEdge:P.shelfEdge;
+    const ft=eT+P.topReturn-P.stretch-P.topCut/2, fs=eS+P.shelfReturn-P.stretch-P.shelfCut/2;
     const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
     const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
