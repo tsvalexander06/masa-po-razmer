@@ -57,8 +57,10 @@
       <input type="number" class="f-splashH" value="100" min="20" max="300" step="10">
     </div>
 
-    <label>Отстояние на задните крака от задния ръб/борд <span class="hint">(мм, мин. 12 мм)</span></label>
-    <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
+    <div class="f-legBackBox">
+      <label>Отстояние на задните крака от задния ръб (стената) <span class="hint">(мм, мин. 12 мм)</span></label>
+      <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
+    </div>
 
     <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долна основа (плот)</label>
     <div class="sub f-baseBox">
@@ -125,7 +127,7 @@
     const realL=v.L, realD=v.D, realH=v.H;
     if(!realL||!realD||!realH){ svgEl.innerHTML=''; return; }
     const splashOn=v.splashOn, splashH=v.splashH;
-    const legBack=v.legBack, baseOn=v.baseOn, baseH=v.baseH;
+    const legBack=legBackOf(v), baseOn=v.baseOn, baseH=v.baseH;
     const midOn=v.midOn;
     const legProfile=v.legProfile||30;
 
@@ -164,7 +166,9 @@
     box(lxL,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
     box(lxR,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
-    if(splashOn){ const bs=Math.max(0.03, splashH/1000); box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=PRICE.splashHem/1000;
+      if(hm>0) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
+      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
@@ -223,7 +227,7 @@
     s+="Дебелина ламарина: 1.5 мм\n";
     s+="Профил крак: 30 × 30 мм\n";
     s+="Борд:       "+(v.splashOn?"ДА ("+v.splashH+" мм)":"НЕ")+"\n";
-    s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
+    if(!v.splashOn) s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
     s+="Долна основа (плот): "+(v.baseOn?"ДА (на "+v.baseH+" мм от пода)":"НЕ")+"\n";
     s+="Втори междинен плот: "+(v.midOn?"ДА (по средата между основата и работния плот, ≈ "+v.mid2H+" мм от пода)":"НЕ")+"\n";
     if(v.notes) s+="Бележки:    "+v.notes+"\n";
@@ -238,6 +242,7 @@
       const v = readTable(t);
       t.vals = v;
       t.card.querySelector('.f-splashBox').style.display = v.splashOn?"block":"none";
+      t.card.querySelector('.f-legBackBox').style.display = v.splashOn?"none":"block";
       t.card.querySelector('.f-baseBox').style.display = v.baseOn?"block":"none";
       t.card.querySelector('.f-midBox').style.display = v.midOn?"block":"none";
       t.card.querySelector('.f-mid2info').textContent = v.midOn ? "(≈ "+v.mid2H+" мм от пода)" : "";
@@ -472,16 +477,18 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
-    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
+    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
-  const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  const pBends  = t => (6 + (t.splashOn?(PRICE.splashHem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  // с борд задният ръб не опира в стената — отстоянието на задните крака не се смята
+  const legBackOf = t => t.splashOn ? 0 : (+t.legBack||0);
   function pBlankM2(t){
     const P=PRICE, eT=+t.topEdge>0?+t.topEdge:P.topEdge, eS=+t.shelfEdge>0?+t.shelfEdge:P.shelfEdge;
     const ft=eT+P.topReturn-P.stretch-P.topCut/2, fs=eS+P.shelfReturn-P.stretch-P.shelfCut/2;
-    const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
+    const back = t.splashOn ? (+t.splashH||0)+P.splashHem-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
+    const shL=t.L-P.shelfGapW, shD=t.D-legBackOf(t)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }

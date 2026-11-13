@@ -3,7 +3,7 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -15,6 +15,7 @@
     ["shelfGapW","Долен плот — намаление ширина","мм, общо (за влизане между краката / заварка)"],
     ["feet","Регулируеми крачета","мм височина; 0 = без"],
     ["stretch","Удължение на перото при огъване","мм — перото излиза с толкова по-дълго (в заготовката: перо − това)"],
+    ["splashHem","Борд — подгъвка горе","мм, назад към стената; 0 = без"],
     ["topCut","Работен плот — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["shelfCut","Долни плотове — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["tubeWall","Стена на тръбата","мм, за теглото"],
@@ -91,16 +92,18 @@
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
     markupPct: 100,     // надценка % (клиентска цена = формула × 2)
-    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
+    topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
-  const pBends  = t => (6 + (t.splashOn?1:2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  const pBends  = t => (6 + (t.splashOn?(PRICE.splashHem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+  // с борд задният ръб не опира в стената — отстоянието на задните крака не се смята
+  const legBackOf = t => t.splashOn ? 0 : (+t.legBack||0);
   function pBlankM2(t){
     const P=PRICE, eT=+t.topEdge>0?+t.topEdge:P.topEdge, eS=+t.shelfEdge>0?+t.shelfEdge:P.shelfEdge;
     const ft=eT+P.topReturn-P.stretch-P.topCut/2, fs=eS+P.shelfReturn-P.stretch-P.shelfCut/2;
-    const back = t.splashOn ? (+t.splashH||0)-P.topCut/2 : ft;
+    const back = t.splashOn ? (+t.splashH||0)+P.splashHem-P.topCut/2 : ft;
     const topW=(t.L+2*ft)/1000, topD=(t.D+ft+back)/1000;
-    const shL=t.L-P.shelfGapW, shD=t.D-(+t.legBack||0)-P.shelfGap;
+    const shL=t.L-P.shelfGapW, shD=t.D-legBackOf(t)-P.shelfGap;
     const sh=(shL>0&&shD>0)?((shL+2*fs)/1000)*((shD+2*fs)/1000):0;
     return Math.max(0,topW*topD) + ((t.baseOn?1:0)+(t.midOn?1:0))*Math.max(0,sh);
   }
@@ -353,6 +356,9 @@
     const t = order.tables[i];
     drawBlueprint(Object.assign({}, t, { mid2H:mid2H(t), topEdge:edgeTop(t), shelfEdge:edgeShelf(t) }), card.querySelector(".draw"));
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
+    // с борд задният ръб не опира в стената — отстоянието на задните крака не се ползва
+    const lb = card.querySelector('[data-k="legBack"]');
+    if(lb){ lb.disabled = order.stage !== "new" || t.splashOn; lb.title = t.splashOn ? "Не се ползва при борд" : ""; }
   }
 
   /* ---------- isometric 3D drawing — same as the customer form (site/app.js) ---------- */
@@ -360,7 +366,7 @@
     const realL=v.L, realD=v.D, realH=v.H;
     if(!realL||!realD||!realH){ svgEl.innerHTML=''; return; }
     const splashOn=v.splashOn, splashH=v.splashH;
-    const legBack=v.legBack, baseOn=v.baseOn, baseH=v.baseH;
+    const legBack=legBackOf(v), baseOn=v.baseOn, baseH=v.baseH;
     const midOn=v.midOn;
     const legProfile=v.legProfile||30;
 
@@ -396,7 +402,9 @@
     box(lxL,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
     box(lxR,0,frontZ,lg,legH,lg,TOP,FRONT,RIGHT);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
-    if(splashOn){ const bs=Math.max(0.03, splashH/1000); box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=PRICE.splashHem/1000;
+      if(hm>0) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
+      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT); }
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
@@ -463,17 +471,17 @@
     const profTxt = (e, r) => "челна дъска " + e + " мм надолу" + (r > 0 ? " + " + r + " мм навътре" : "");
 
     const fTop = flange(E, R, cT);
-    const back = t.splashOn ? t.splashH - cT : fTop;
+    const hem = t.splashOn ? S.splashHem : 0, back = t.splashOn ? t.splashH + hem - cT : fTop;
     const topW = t.L + 2*fTop, topD = t.D + fTop + back;
     rows.push({ kind:"sheet", part:"Работен плот" + (t.splashOn ? " с борд" : ""), mat:sheetMat, size:fmt(topW)+" × "+fmt(topD), qty:1,
-      note:"Готов: "+t.L+" × "+t.D+" мм. Отпред и отстрани: "+profTxt(E, R)+"; отзад: "+(t.splashOn ? "борд "+t.splashH+" мм нагоре" : "същото")+
+      note:"Готов: "+t.L+" × "+t.D+" мм. Отпред и отстрани: "+profTxt(E, R)+"; отзад: "+(t.splashOn ? "борд "+t.splashH+" мм нагоре"+(hem ? " + подгъвка "+hem+" мм назад към стената (огъване нагоре на "+fmt(back)+" мм и подгъвка на "+hem+" мм от задния ръб на заготовката)" : " (огъване нагоре на "+fmt(back)+" мм от задния ръб на заготовката)") : "същото")+
            ". Изрези в ъглите: отпред "+fmt(fTop)+"×"+fmt(fTop)+", отзад "+fmt(fTop)+"×"+fmt(back)+" мм. Виж схемата." });
     sheets.push({ label:tag+" плот", w:topW, h:topD });
     schemes.push({ title:"Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:t.L, plateD:t.D, E, R,
-      backUp:!!t.splashOn, splashH:t.splashH, leg:0, blankW:topW, blankD:topD, cut:S.topCut });
+      backUp:!!t.splashOn, splashH:t.splashH, hem, backFlat:back, leg:0, blankW:topW, blankD:topD, cut:S.topCut });
 
     // долният плот идва наравно с краката: ширина само − shelfGapW; дълбочина − заден отстъп − shelfGap
-    const shL = t.L - S.shelfGapW, shD = t.D - t.legBack - S.shelfGap;
+    const shL = t.L - S.shelfGapW, shD = t.D - legBackOf(t) - S.shelfGap;
     const shelves = [];
     if(t.baseOn) shelves.push({ name:"Долна основа (плот)", short:"основа", at:t.baseH });
     if(t.midOn) shelves.push({ name:"Втори междинен плот", short:"междинен", at:mid2H(t) });
@@ -507,7 +515,7 @@
     // fold segments in proportion to each other (2 px per mm: 10 → 20, 30 → 60); the plate itself is not to scale
     const segPx = v => Math.max(18, Math.min(90, v * 2));
     const side = sc.R > 0 ? [sc.R, sc.E] : [sc.E];                 // outer edge → plate
-    const backSegs = sc.backUp ? [sc.splashH] : side;
+    const backSegs = sc.backUp ? (sc.hem ? [sc.hem, sc.splashH] : [sc.splashH]) : side;
     const sp = side.map(segPx), bp = backSegs.map(segPx);
     const fx = sp.reduce((a, b) => a + b, 0), fyB = bp.reduce((a, b) => a + b, 0), fyF = fx;
     const k = Math.min(300 / sc.plateL, 190 / sc.plateD);
@@ -517,7 +525,7 @@
     const t = (x, y, s, o) => '<text x="' + x + '" y="' + y + '" ' + (o || '') + '>' + s + '</text>';
     const ln = (x1, y1, x2, y2, st) => '<line x1="' + x1 + '" y1="' + y1 + '" x2="' + x2 + '" y2="' + y2 + '" ' + st + '/>';
     const RED = 'stroke="#dc2626" stroke-width="2" stroke-dasharray="7 4"', ORG = 'stroke="#ea580c" stroke-width="2" stroke-dasharray="3 3"',
-          GRN = 'stroke="#16a34a" stroke-width="2" stroke-dasharray="7 4"', DIM = 'stroke="#475569" stroke-width="1"';
+          GRN = 'stroke="#16a34a" stroke-width="2" stroke-dasharray="7 4"', PUR = 'stroke="#9333ea" stroke-width="2" stroke-dasharray="3 3"', DIM = 'stroke="#475569" stroke-width="1"';
     let g = '';
     // blank outline with corner notches (flange, plus leg for shelves)
     const xa = X0 + fx + nl, xb = X0 + fx + PW - nl, ya = Y0 + fyB + nl, yb = Y0 + fyB + PD - nl;
@@ -529,7 +537,11 @@
       g += ln(X0 + c, ya, X0 + c, yb, st) + ln(X0 + BW - c, ya, X0 + BW - c, yb, st);
       g += ln(xa, Y0 + BH - c, xb, Y0 + BH - c, st); });
     c = 0;
-    bp.forEach((w, i) => { c += w; const st = sc.backUp ? GRN : (i === bp.length - 1 ? RED : ORG); g += ln(xa, Y0 + c, xb, Y0 + c, st); });
+    bp.forEach((w, i) => { c += w; const last = i === bp.length - 1, st = sc.backUp ? (last ? GRN : PUR) : (last ? RED : ORG); g += ln(xa, Y0 + c, xb, Y0 + c, st); });
+    if(sc.backUp){   // where to bend, measured from the back edge of the blank
+      g += t(X0 + BW / 2, Y0 + fyB - 7, "↑ огъване нагоре на " + fmt(sc.backFlat) + " мм от задния ръб", 'text-anchor="middle" font-size="12" font-weight="700" fill="#16a34a"');
+      if(sc.hem) g += t(X0 + BW / 2, Y0 + bp[0] - 6, "подгъвка на " + fmt(sc.hem) + " мм от ръба", 'text-anchor="middle" font-size="11" font-weight="700" fill="#9333ea"');
+    }
     g += t(X0 + BW / 2, Y0 + fyB + PD / 2 - 6, sc.leg ? "плот" : "работен плот", 'text-anchor="middle" font-size="13" fill="#15223a"');
     g += t(X0 + BW / 2, Y0 + fyB + PD / 2 + 12, fmt(sc.plateL) + " × " + fmt(sc.plateD), 'text-anchor="middle" font-size="15" font-weight="700" fill="#15223a"');
     g += t(X0 + BW / 2, Y0 + fyB + 18 + nl, sc.backUp ? "ОТЗАД (борд)" : "ОТЗАД", 'text-anchor="middle" font-size="11" fill="#64748b"');
@@ -568,12 +580,15 @@
       g += ln(rx, eyB + 14, ex, eyB + 14, DIM) + ln(rx, eyB + 9, rx, eyB + 19, DIM) + ln(ex, eyB + 9, ex, eyB + 19, DIM);
       g += t((rx + ex) / 2, eyB + 32, sc.R + " мм навътре", 'text-anchor="middle" font-size="14" font-weight="700" fill="#ea580c"');
     }
-    let ly = eyB + 62;
+    let ly = eyB + 62 + (sc.backUp && sc.hem ? 26 : 0);
     if(sc.backUp){
       const kb = Math.min(1.2, 70 / Math.max(sc.splashH, 1)), bx = PX + 20, by = ly + sc.splashH * kb;
-      g += t(PX, ly - 6, "Отзад — борд", 'font-size="12" font-weight="700" fill="#15223a"');
+      g += t(PX, ly - (sc.hem ? 30 : 6), "Отзад — борд", 'font-size="12" font-weight="700" fill="#15223a"');
       g += '<path d="M' + (bx + 130) + ',' + by + ' L' + bx + ',' + by + ' L' + bx + ',' + ly + '" fill="none" stroke="#15223a" stroke-width="4"/>';
       g += t(bx + 10, (ly + by) / 2 + 5, sc.splashH + " мм нагоре", 'font-size="14" font-weight="700" fill="#16a34a"');
+      if(sc.hem){ const hx = bx - sc.hem * 1.6;
+        g += '<path d="M' + bx + ',' + ly + ' L' + hx + ',' + ly + '" fill="none" stroke="#15223a" stroke-width="4"/>';
+        g += t(hx - 6, ly - 9, sc.hem + " мм назад", 'text-anchor="start" font-size="13" font-weight="700" fill="#9333ea"'); }
       ly = by + 26;
     }else{
       g += t(PX, ly, sc.leg ? "Еднакво от 4-те страни." : "Отзад — същото като отпред.", 'font-size="12" fill="#475569"');
@@ -581,7 +596,7 @@
     }
     // legend
     const LY = Math.max(Y0 + BH + (sc.leg ? 40 : 26), ly + 10);
-    const leg = [[RED, "огъване 90° надолу (челна дъска)"]].concat(sc.R > 0 ? [[ORG, "обратно огъване 90° навътре"]] : []).concat(sc.backUp ? [[GRN, "борд — огъване нагоре"]] : []);
+    const leg = [[RED, "огъване 90° надолу (челна дъска)"]].concat(sc.R > 0 ? [[ORG, "обратно огъване 90° навътре"]] : []).concat(sc.backUp ? [[GRN, "борд — огъване нагоре"]] : []).concat(sc.backUp && sc.hem ? [[PUR, "подгъвка на борда (назад)"]] : []);
     leg.forEach((l, i) => { const lx = 20 + i * 250; g += ln(lx, LY, lx + 34, LY, l[0]) + t(lx + 42, LY + 4, l[1], 'font-size="12" fill="#334155"'); });
     const VW = Math.max(PX + 260, 20 + leg.length * 250), VH = LY + 16;
     return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">' + g + '</svg>' +
@@ -841,8 +856,8 @@
       const t = o.tables[i], q = t.qty;
       h += '<div class="card"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
         '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
-        ' · борд: ' + (t.splashOn ? t.splashH + ' мм' : 'НЕ') +
-        ' · задни крака от ръба: ' + t.legBack + ' мм' +
+        ' · борд: ' + (t.splashOn ? t.splashH + ' мм' + (S.splashHem ? ' + подгъвка ' + S.splashHem + ' мм' : '') : 'НЕ') +
+        (t.splashOn ? '' : ' · задни крака от ръба: ' + t.legBack + ' мм') +
         ' · челна дъска: плот ' + edgeTop(t) + ' мм' + (t.baseOn || t.midOn ? ', долни плотове ' + edgeShelf(t) + ' мм' : '') +
         ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' : 'НЕ') +
         ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
