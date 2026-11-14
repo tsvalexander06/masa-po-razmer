@@ -3,6 +3,6 @@
    И двете са публични по замисъл; данните са защитени от входа и от правилата в supabase/schema.sql.
    Празно = админът работи само с данните в този браузър (както досега). */
 window.MPR_CLOUD = {
-  url: "",
-  key: ""
+  url: "https://cunaarpeucuslubjhvma.supabase.co",
+  key: "sb_publishable__fRvkRfTpgsjhORydcopog_tOER4iDT"
 };
