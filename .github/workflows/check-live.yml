@@ -15,11 +15,11 @@ jobs:
     steps:
       - name: Fetch the admin page
         run: |
-          for u in https://inox.konvektomat.store/admin/index.html https://inox.konvektomat.store/admin/ https://tsvalexander06.github.io/admin/index.html; do
+          for u in https://inox.konvektomat.store/admin/index.html https://inox.konvektomat.store/index.html https://tsvalexander06.github.io/masa-po-razmer/admin/index.html https://tsvalexander06.github.io/masa-po-razmer/index.html; do
             echo "=== $u"
             curl -sS -m 30 -L -D headers.txt -o page.html "$u" || true
-            grep -iE '^HTTP|^cache-control|^age|^server|^cf-|^x-cache|^x-served|^via|^last-modified|^location' headers.txt || true
-            grep -oE 'build [0-9a-f]{8}[^<]*|src="[^"]+"' page.html | head -8 || true
+            grep -iE '^HTTP|^server|^last-modified|^location' headers.txt || true
+            grep -oE 'build [^<]{0,40}|src="[a-z][^"]{0,60}"' page.html | head -8 || true
           done
           echo "=== DNS"
           getent hosts inox.konvektomat.store || true
