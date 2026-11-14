@@ -1,0 +1,30 @@
+name: Keep the Supabase project awake
+
+# A free Supabase project is paused after 7 days without any request.
+# This sends one small read every 2 days so the admin's cloud never sleeps.
+# Uses only the public URL and key from site/admin/cloud-config.js (no secrets);
+# the database answers with nothing because the request is not logged in.
+
+on:
+  schedule:
+    - cron: "23 3 */2 * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Ping Supabase
+        run: |
+          U="$(grep -oE 'https://[a-z0-9-]+\.supabase\.co' site/admin/cloud-config.js | head -1 || true)"
+          K="$(grep -oE 'key: *"[^"]+"' site/admin/cloud-config.js | sed -E 's/key: *"([^"]+)"/\1/' | head -1 || true)"
+          if [ -z "$U" ] || [ -z "$K" ]; then echo "Cloud not configured yet — nothing to do."; exit 0; fi
+          code="$(curl -s -o /dev/null -w '%{http_code}' "$U/rest/v1/kv?select=id&limit=1" -H "apikey: $K")"
+          echo "Supabase answered HTTP $code"
+          if [ "$code" -ge 500 ] || [ "$code" = "000" ]; then exit 1; fi

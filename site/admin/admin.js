@@ -54,7 +54,7 @@
     }
     return s;
   }
-  function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} }
+  function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} cloudDirty(); }
   function buildSettings(){
     $("settings").innerHTML = SETTINGS.map(([k,l,h]) =>
       '<label>'+esc(l)+'<input type="number" step="any" min="0" data-k="'+k+'" value="'+esc(S[k])+'"><span class="hint">'+esc(h)+'</span></label>').join("");
@@ -148,7 +148,7 @@
   let saveTimer = null;
   function saveOrders(){
     clearTimeout(saveTimer); saveTimer = null;
-    try{ localStorage.setItem(ORD_KEY, JSON.stringify(ORD)); return true; }
+    try{ localStorage.setItem(ORD_KEY, JSON.stringify(ORD)); cloudDirty(); return true; }
     catch(e){ setStatus("⚠ Браузърът не позволява запазване — свалете резервно копие от „Архив“.", "bad"); return false; }
   }
   const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(saveOrders, 400); };
@@ -1036,7 +1036,7 @@
     return { next:1, items:[], done:{} };
   }
   function saveInv(){
-    try{ localStorage.setItem(INV_KEY, JSON.stringify(INV)); return true; }
+    try{ localStorage.setItem(INV_KEY, JSON.stringify(INV)); cloudDirty(); return true; }
     catch(e){ stockMsg("⚠ Браузърът не позволява запазване — складът ще се загуби при затваряне. Свалете резервно копие.", "bad"); return false; }
   }
   function stockMsg(m, kind){ $("stockStatus").className = "status " + (kind || ""); $("stockStatus").textContent = m; }
@@ -1056,10 +1056,13 @@
       saveInv(); renderStock(); recompute(); stockMsg("Премахната: " + btn.dataset.del + ".", "");
     }));
   }
-  $("addOff").addEventListener("click", () => {
+  $("addOff").addEventListener("click", async () => {
     const a = Math.round(+$("addW").value || 0), b = Math.round(+$("addH").value || 0);
     if(a <= 0 || b <= 0){ stockMsg("Въведете дължина и ширина на парчето.", "warn"); return; }
-    const id = serial(INV.next++), w = Math.max(a, b), h = Math.min(a, b);
+    let n;
+    try{ n = await takeSerials("offcut", 1); }
+    catch(e){ stockMsg((e.offline ? "Няма връзка с облака" : "Грешка") + " — парчето не е добавено. Опитайте пак.", "bad"); return; }
+    const id = serial(n), w = Math.max(a, b), h = Math.min(a, b);
     INV.items.push({ id, w, h, th:1.5, from:$("addNote").value.trim() || "добавена ръчно", added:new Date().toISOString() });
     saveInv(); renderStock(); recompute();
     $("addW").value = ""; $("addH").value = ""; $("addNote").value = "";
@@ -1106,7 +1109,7 @@
 
   async function openDoc(id, onMsg){
     const msg = onMsg || archMsg;
-    try{ const d = await docGet(id); if(!d){ msg("Документът липсва на това устройство."); return; }
+    try{ const d = await getDoc(id); if(!d){ msg(CLOUD ? "Документът не е намерен — може още да не е качен от устройството, на което е зареден." : "Документът липсва на това устройство."); return; }
       const url = URL.createObjectURL(d.blob); const a = document.createElement("a"); a.href = url; a.download = d.name || ("poruchka-" + id + ".pdf");
       document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
     }catch(e){ msg("Грешка при отваряне на документа."); }
@@ -1177,19 +1180,31 @@
   }
 
   // Разкрой → В обработка: takes the offcuts from the store, adds the new ones, gives the order its number
-  function confirmOrder(){
+  async function confirmOrder(){
     const o = order;
     if(!o || o.stage !== "new" || !CURRENT) return;
-    const now = new Date().toISOString(), usedIds = CURRENT.used.map(x => x.id);
-    if(!o.serial) o.serial = ORD.next++;
+    const cur = CURRENT, btn = $("bConfirm");
+    let ser, firstOff;
+    try{
+      if(btn){ btn.disabled = true; btn.textContent = "Потвърждаване..."; }
+      ser = o.serial || await takeSerials("order", 1);
+      firstOff = cur.created.length ? await takeSerials("offcut", cur.created.length) : 0;
+    }catch(e){
+      if(btn){ btn.disabled = false; btn.textContent = "✓ Потвърди разкроя"; }
+      barMsg((e.offline ? "Няма връзка с облака" : "Грешка") + " — разкроят НЕ е потвърден (номерата се раздават от облака, за да не се повтарят). Опитайте пак.", "bad");
+      return;
+    }
+    if(order !== o || o.stage !== "new") return;
+    const now = new Date().toISOString(), usedIds = cur.used.map(x => x.id);
+    o.serial = ser;
     const label = orderSerial(o.serial) + (o.name ? " · " + o.name : "");
     INV.items = INV.items.filter(x => !usedIds.includes(x.id));
-    const added = CURRENT.created.map(c => {
-      const id = serial(INV.next++);
+    const added = cur.created.map((c, i) => {
+      const id = serial(firstOff + i);
       INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:1.5, from:c.src + " · " + label, added:now });
       return id;
     });
-    o.cut = { at:now, used:CURRENT.used.map(x => Object.assign({}, x)), added };
+    o.cut = { at:now, used:cur.used.map(x => Object.assign({}, x)), added };
     snapPrices(o);
     o.stage = "processing"; o.confirmedAt = now; delete o.noData;
     saveInv(); saveOrders(); renderStock();
@@ -1203,7 +1218,7 @@
     if(!o || o.stage !== "new") return;
     ORD.orders = ORD.orders.filter(x => x.id !== o.id);
     saveOrders();
-    if(o.hasDoc){ try{ await docDel(o.id); }catch(e){} }
+    if(o.hasDoc) await dropDoc(o.id);
     SEL.work = null;
     showPage("work");
     setStatus("Поръчката" + (o.name ? " на " + o.name : "") + " е отказана и премахната.", "");
@@ -1322,7 +1337,7 @@
       if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Сигурно? Натисни пак"; return; }
       const o = findOrder(b.dataset.rm);
       ORD.orders = ORD.orders.filter(x => x.id !== b.dataset.rm); saveOrders();
-      if(o && o.hasDoc){ try{ await docDel(o.id); }catch(e){} }
+      if(o && o.hasDoc) await dropDoc(o.id);
       renderArchive(); archMsg("Премахната от архива.", "");
     }));
   }
@@ -1335,7 +1350,7 @@
     const out = { kind:"mpr-orders", v:2, saved:new Date().toISOString(), next:ORD.next, orders:[] };
     for(const o of ORD.orders){
       const rec = Object.assign({}, o);
-      if(o.hasDoc){ try{ const d = await docGet(o.id); if(d){ rec.doc = await blobToB64(d.blob); rec.docName = d.name; } }catch(e){} }
+      if(o.hasDoc){ try{ const d = await getDoc(o.id); if(d){ rec.doc = await blobToB64(d.blob); rec.docName = d.name; } }catch(e){} }
       out.orders.push(rec);
     }
     const url = URL.createObjectURL(new Blob([JSON.stringify(out)], { type:"application/json" }));
@@ -1353,7 +1368,7 @@
       for(const o of d.orders){
         if(!o || !o.id || !Array.isArray(o.tables)) continue;
         if(!STAGES[o.stage]){ o.stage = "archived"; o.archivedAt = o.archivedAt || o.savedAt || ""; }   // copies made before the stages
-        if(o.doc){ try{ await docPut(o.id, b64ToBlob(o.doc, "application/pdf"), o.docName || o.id + ".pdf"); o.hasDoc = true; }catch(e){} delete o.doc; }
+        if(o.doc){ try{ await docPut(o.id, b64ToBlob(o.doc, "application/pdf"), o.docName || o.id + ".pdf"); o.hasDoc = true; o.docCloud = false; }catch(e){} delete o.doc; }
         const i = ORD.orders.findIndex(x => x.id === o.id);
         if(i >= 0) ORD.orders[i] = o; else ORD.orders.push(o);
         n++;
@@ -1364,6 +1379,294 @@
       archMsg("✓ Заредени " + n + " поръчки от копието (общо " + ORD.orders.length + ").", "ok");
     }catch(e){ archMsg("✕ Файлът не е резервно копие на поръчките.", "bad"); }
   });
+
+  /* ---------- облак: синхронизиране между устройствата ----------
+     Облакът (Supabase) пази всичко: поръчки, PDF-и, фира, настройки и поредните номера. Всяко устройство
+     държи копие в браузъра — за бърза работа и без интернет — и праща/взема промените:
+       • запис на ред: промяна на това устройство печели; промяна от друго устройство се взема; изтрито
+         на едното се трие и на другото (сравнява се с последното синхронизирано състояние на всеки ред);
+       • №/Ф- номерата се раздават от базата (take_serial), затова не се повтарят между устройствата;
+       • PDF-ите се качват във фонов режим и се свалят при нужда на другите устройства. */
+  var CLOUD = (window.Cloud && Cloud.configured) ? Cloud : null;
+  var cloudReady = false, syncing = null, syncAgain = false, syncTimer = null;
+  var SYNC_KEY = "mpr-sync-v1", BACKUP_KEY = "mpr-last-backup";
+  var SY = (function(){ try{ return JSON.parse(localStorage.getItem(SYNC_KEY) || "null") || {}; }catch(e){ return {}; } })();
+  ["orders","offcuts","kv"].forEach(k => { if(!SY[k] || typeof SY[k] !== "object") SY[k] = {}; });
+  if(!Array.isArray(SY.docDel)) SY.docDel = [];
+  function saveSyncMeta(){ try{ localStorage.setItem(SYNC_KEY, JSON.stringify(SY)); }catch(e){} }
+
+  // key order does not matter (the database reorders JSON keys)
+  function stable(v){
+    if(Array.isArray(v)) return "[" + v.map(stable).join(",") + "]";
+    if(v && typeof v === "object") return "{" + Object.keys(v).sort().filter(k => v[k] !== undefined).map(k => JSON.stringify(k) + ":" + stable(v[k])).join(",") + "}";
+    return JSON.stringify(v === undefined ? null : v);
+  }
+  function hsh(v){ const s = stable(v); let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0; return h.toString(36) + s.length.toString(36); }
+
+  const saveOrdersLocal = () => { try{ localStorage.setItem(ORD_KEY, JSON.stringify(ORD)); }catch(e){} };
+  const saveInvLocal = () => { try{ localStorage.setItem(INV_KEY, JSON.stringify(INV)); }catch(e){} };
+  const saveSettingsLocal = () => { try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} };
+  const COLS = {
+    orders:{ table:"orders", rows:() => ORD.orders.map(o => ({ id:o.id, data:o })),
+      apply:(takes, drops) => {
+        takes.forEach(r => { const d = Object.assign({}, r.data, { id:r.id }), ex = ORD.orders.find(o => o.id === r.id);
+          if(ex){ Object.keys(ex).forEach(k => delete ex[k]); Object.assign(ex, d); } else ORD.orders.push(d); });
+        if(drops.length) ORD.orders = ORD.orders.filter(o => !drops.includes(o.id));
+        saveOrdersLocal(); } },
+    offcuts:{ table:"offcuts", rows:() => INV.items.map(o => ({ id:o.id, data:o })),
+      apply:(takes, drops) => {
+        takes.forEach(r => { const d = Object.assign({}, r.data, { id:r.id }), i = INV.items.findIndex(o => o.id === r.id);
+          if(i >= 0) INV.items[i] = d; else INV.items.push(d); });
+        if(drops.length) INV.items = INV.items.filter(o => !drops.includes(o.id));
+        saveInvLocal(); } },
+    kv:{ table:"kv", rows:() => [{ id:"settings", data:S }, { id:"invDone", data:INV.done }],
+      apply:(takes) => {
+        takes.forEach(r => {
+          if(r.id === "settings"){ S = Object.assign({}, DEFAULTS, r.data || {}); saveSettingsLocal(); }
+          if(r.id === "invDone"){ INV.done = r.data || {}; saveInvLocal(); } }); } },
+  };
+  const rowData = (name, id) => { const r = COLS[name].rows().find(x => x.id === id); return r ? r.data : undefined; };
+  function dirtyCount(){
+    let n = 0;
+    Object.keys(COLS).forEach(name => {
+      const snap = SY[name], ids = new Set();
+      COLS[name].rows().forEach(r => { ids.add(r.id); if(!snap[r.id] || snap[r.id].h !== hsh(r.data)) n++; });
+      Object.keys(snap).forEach(id => { if(!ids.has(id)) n++; });
+    });
+    return n + SY.docDel.length + ORD.orders.filter(o => o.hasDoc && !o.docCloud).length;
+  }
+
+  // one collection: three-way merge against the last synced state of every row
+  async function syncCol(name){
+    const C = COLS[name], snap = SY[name];
+    const local = new Map(C.rows().map(r => [r.id, r]));
+    const remote = new Map((await CLOUD.list(C.table)).map(r => [r.id, r.updated_at]));
+    const need = [...remote.keys()].filter(id => !snap[id] || snap[id].u !== remote.get(id));
+    const fetched = new Map((need.length ? await CLOUD.fetchRows(C.table, need) : []).map(r => [r.id, r]));
+    const ups = [], dels = [], takes = [], drops = [];
+    new Set([...local.keys(), ...remote.keys(), ...Object.keys(snap)]).forEach(id => {
+      const l = local.get(id), s = snap[id], ru = remote.get(id);
+      if(l){
+        const h = hsh(l.data);
+        if(!s && ru !== undefined){ if(fetched.has(id)) takes.push(fetched.get(id)); }        // first sync of this device: the cloud's copy wins
+        else if(!s || s.h !== h) ups.push({ id, h, body:JSON.parse(JSON.stringify(l.data)) }); // changed here
+        else if(ru === undefined) drops.push(id);                                              // deleted elsewhere
+        else if(s.u !== ru && fetched.has(id)) takes.push(fetched.get(id));                    // changed elsewhere
+      }else if(s){
+        if(ru === undefined) delete snap[id];
+        else if(s.u !== ru){ if(fetched.has(id)) takes.push(fetched.get(id)); }                // changed elsewhere after we deleted
+        else dels.push(id);                                                                    // deleted here
+      }else if(ru !== undefined && fetched.has(id)) takes.push(fetched.get(id));               // new elsewhere
+    });
+    if(takes.length || drops.length){
+      C.apply(takes, drops);
+      takes.forEach(r => { snap[r.id] = { h:hsh(rowData(name, r.id)), u:r.updated_at }; });
+      drops.forEach(id => delete snap[id]);
+    }
+    if(ups.length){
+      const res = await CLOUD.upsert(C.table, ups.map(u => ({ id:u.id, data:u.body })));
+      const at = new Map(res.map(x => [x.id, x.updated_at]));
+      ups.forEach(u => { if(at.has(u.id)) snap[u.id] = { h:u.h, u:at.get(u.id) }; });
+    }
+    if(dels.length){ await CLOUD.remove(C.table, dels); dels.forEach(id => delete snap[id]); }
+    return { ids:takes.map(r => r.id).concat(drops), any:takes.length + drops.length > 0 };
+  }
+  async function syncCounters(){
+    const c = await CLOUD.counters();
+    let changed = false;
+    for(const [name, box] of [["order", ORD], ["offcut", INV]]){
+      const cv = +c[name] || 0;
+      if(box.next > cv) await CLOUD.rpc("take_serial", { p_name:name, p_count:0, p_min:box.next });   // the cloud must not hand out numbers we already used
+      else if(cv > box.next){ box.next = cv; changed = true; }
+    }
+    if(changed){ saveOrdersLocal(); saveInvLocal(); }
+  }
+  async function uploadDocs(){
+    let n = 0;
+    for(const o of ORD.orders.slice()){
+      if(!o.hasDoc || o.docCloud) continue;
+      let d = null; try{ d = await docGet(o.id); }catch(e){}
+      if(!d) continue;                                  // the PDF is on another device that has not uploaded it yet
+      await CLOUD.docUp(o.id, d.blob);
+      o.docCloud = true; n++;
+    }
+    if(n) saveOrdersLocal();
+  }
+  async function processDocDeletes(){
+    if(!SY.docDel.length) return;
+    const list = SY.docDel.slice();
+    await CLOUD.docRemove(list);
+    SY.docDel = SY.docDel.filter(id => !list.includes(id));
+  }
+
+  async function syncNow(){
+    if(!CLOUD || !cloudReady) return;
+    if(syncing){ syncAgain = true; return syncing; }
+    syncing = (async () => {
+      const changed = { orders:[], offcuts:false, kv:false };
+      try{
+        syncState("busy");
+        await uploadDocs();
+        await processDocDeletes();
+        const o = await syncCol("orders"); changed.orders = o.ids;
+        changed.offcuts = (await syncCol("offcuts")).any;
+        changed.kv = (await syncCol("kv")).any;
+        await syncCounters();
+        saveSyncMeta();
+        syncState(dirtyCount() ? "pending" : "ok");
+      }catch(e){
+        saveSyncMeta();
+        if(e && e.status === 401){ syncState("error", { message:"Входът е изтекъл — влезте отново." }); }
+        else syncState(e && e.offline ? "offline" : "error", e);
+      }finally{ syncing = null; }
+      afterRemoteChange(changed);
+      if(syncAgain){ syncAgain = false; syncNow(); }
+    })();
+    return syncing;
+  }
+  function cloudDirty(){
+    if(!CLOUD || !cloudReady) return;
+    syncState("pending");
+    clearTimeout(syncTimer); syncTimer = setTimeout(syncNow, 800);
+  }
+  // redraw what another device changed (only what is affected)
+  function afterRemoteChange(ch){
+    if(!ch.orders.length && !ch.offcuts && !ch.kv) return;
+    if(ch.kv){ buildSettings(); }
+    if(ch.offcuts) renderStock();
+    renderLists();
+    if(PAGE === "archive") renderArchive();
+    if(order && ch.orders.includes(order.id)) openViewer();
+    else if(order && (ch.offcuts || ch.kv)) recompute();
+    else if(!order && (PAGE === "work" || PAGE === "processing") && SEL[PAGE]) openViewer();
+    renderDataInfo();
+  }
+
+  // serial numbers: from the cloud when there is one (unique across devices), otherwise locally
+  async function takeSerials(name, count){
+    const box = name === "order" ? ORD : INV;
+    if(!CLOUD){ const f = box.next; box.next += count; return f; }
+    if(!cloudReady) throw Object.assign(new Error("not ready"), { offline:true });
+    const f = +(await CLOUD.rpc("take_serial", { p_name:name, p_count:count, p_min:box.next }));
+    if(!(f > 0)) throw new Error("Облакът не върна номер.");
+    box.next = Math.max(box.next, f + count);
+    return f;
+  }
+  // the PDF of an order: this device first, then the cloud (and keep a copy here)
+  async function getDoc(id){
+    let d = null; try{ d = await docGet(id); }catch(e){}
+    if(d || !CLOUD || !cloudReady) return d;
+    const blob = await CLOUD.docDown(id);
+    if(!blob) return null;
+    const rec = findOrder(id), name = (rec && rec.docName) || ("poruchka-" + id + ".pdf");
+    try{ await docPut(id, blob, name); }catch(e){}
+    return { blob, name };
+  }
+  async function dropDoc(id){
+    try{ await docDel(id); }catch(e){}
+    if(CLOUD){ SY.docDel.push(id); saveSyncMeta(); cloudDirty(); }
+  }
+  function barMsg(m, k){ const e = $("barStatus"); if(e){ e.className = "status " + (k || ""); e.textContent = m; } }
+
+  function syncState(st, e){
+    const el = $("syncState"); if(!el) return;
+    const T = { ok:"☁ Записано в облака", busy:"☁ Синхронизиране…", pending:"☁ Записва…", offline:"⚠ Без връзка — пази се тук",
+                error:"⚠ Облакът не записа", local:"Само на това устройство" };
+    el.hidden = false; el.className = "sync noprint " + st; el.textContent = T[st] || st;
+    el.title = st === "offline" ? "Няма връзка с облака. Промените се пазят на това устройство и ще се качат, когато връзката се върне."
+             : st === "error" ? ((e && e.message) || "Грешка") : st === "local" ? "Облакът не е настроен — данните са само в този браузър." : "";
+    renderDataInfo();
+  }
+  function renderDataInfo(){
+    const el = $("dataInfo"); if(!el) return;
+    const last = (() => { try{ return localStorage.getItem(BACKUP_KEY) || ""; }catch(e){ return ""; } })();
+    el.innerHTML = (CLOUD
+      ? 'Данните се пазят <b>в облака</b>' + (CLOUD.email() ? ' (вход: ' + esc(CLOUD.email()) + ')' : '') + ' и са достъпни от всяко устройство след вход. ' +
+        'Това устройство държи копие за работа без интернет' + (cloudReady && dirtyCount() ? ' — <b>' + dirtyCount() + ' промени чакат качване</b>.' : '.')
+      : '<b>Облакът не е настроен</b> — данните са само в този браузър. Изтриване на „бисквитки и данни на сайтове“ ги изтрива.') +
+      '<br>Последно пълно резервно копие от това устройство: <b>' + (last ? esc(fmtDT(last)) : 'никога') + '</b>.';
+    const nag = $("backupNag");
+    if(nag){
+      const days = last ? (Date.now() - new Date(last)) / 864e5 : Infinity, has = ORD.orders.length > 0;
+      const lim = CLOUD ? 30 : 7;
+      nag.hidden = !(has && days > lim);
+      nag.textContent = "⚠ " + (last ? "Последното пълно резервно копие е отпреди " + Math.floor(days) + " дни." : "Още няма пълно резервно копие.") +
+        " Свалете ново от Настройки → „Свали пълно резервно копие“" + (CLOUD ? " (облакът на безплатния план няма автоматични копия)." : ".");
+    }
+  }
+
+  // full backup: orders with their PDFs, offcut store, settings, serial counters — one file
+  $("fullExport").addEventListener("click", async () => {
+    const st = $("dataStatus"); st.className = "status"; st.textContent = "Подготвям копието с документите...";
+    const orders = [];
+    for(const o of ORD.orders){
+      const rec = Object.assign({}, o);
+      if(o.hasDoc){ try{ const d = await getDoc(o.id); if(d){ rec.doc = await blobToB64(d.blob); rec.docName = d.name; } }catch(e){} }
+      orders.push(rec);
+    }
+    const out = { kind:"mpr-full", v:1, saved:new Date().toISOString(), settings:S,
+                  orders:{ next:ORD.next, orders }, offcuts:{ next:INV.next, items:INV.items, done:INV.done } };
+    const url = URL.createObjectURL(new Blob([JSON.stringify(out)], { type:"application/json" }));
+    const a = document.createElement("a"); a.href = url; a.download = "admin-pylno-kopie-" + new Date().toISOString().slice(0, 10) + ".json";
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 4000);
+    try{ localStorage.setItem(BACKUP_KEY, new Date().toISOString()); }catch(e){}
+    st.className = "status ok"; st.textContent = "⬇ Свалено: " + ORD.orders.length + " поръчки, " + INV.items.length + " парчета фира и настройките. Пазете файла на сигурно място (напр. Google Drive).";
+    renderDataInfo();
+  });
+  $("fullImport").addEventListener("click", () => $("fullImportFile").click());
+  $("fullImportFile").addEventListener("change", async () => {
+    const f = $("fullImportFile").files[0]; $("fullImportFile").value = ""; if(!f) return;
+    const st = $("dataStatus");
+    try{
+      const d = JSON.parse(await f.text());
+      if(!d || d.kind !== "mpr-full") throw new Error("bad");
+      let no = 0, nf = 0;
+      for(const o of (d.orders && d.orders.orders) || []){
+        if(!o || !o.id || !Array.isArray(o.tables)) continue;
+        if(!STAGES[o.stage]){ o.stage = "archived"; o.archivedAt = o.archivedAt || o.savedAt || ""; }
+        if(o.doc){ try{ await docPut(o.id, b64ToBlob(o.doc, "application/pdf"), o.docName || o.id + ".pdf"); o.hasDoc = true; o.docCloud = false; }catch(e){} delete o.doc; }
+        const i = ORD.orders.findIndex(x => x.id === o.id);
+        if(i >= 0) ORD.orders[i] = o; else ORD.orders.push(o);
+        no++;
+      }
+      ORD.next = Math.max(ORD.next, +(d.orders && d.orders.next) || 1, 1 + Math.max(0, ...ORD.orders.map(o => +o.serial || 0)));
+      const off = d.offcuts || {};
+      (off.items || []).forEach(o => { if(o && o.id && +o.w > 0 && +o.h > 0 && !INV.items.some(x => x.id === o.id)){ INV.items.push(o); nf++; } });
+      Object.assign(INV.done, off.done || {});
+      INV.next = Math.max(INV.next, +off.next || 1, 1 + Math.max(0, ...INV.items.map(o => +String(o.id).replace(/\D/g, "") || 0)));
+      if(d.settings) S = Object.assign({}, DEFAULTS, d.settings);
+      saveSettings(); saveInv(); saveOrders();
+      buildSettings(); renderStock(); renderLists(); renderArchive(); openViewer();
+      st.className = "status ok"; st.textContent = "✓ Заредено: " + no + " поръчки, " + nf + " нови парчета фира и настройките." + (CLOUD ? " Качват се в облака..." : "");
+    }catch(e){ st.className = "status bad"; st.textContent = "✕ Файлът не е пълно резервно копие на админа."; }
+  });
+
+  // logout: the data stays in the cloud; the copy on this device is removed
+  $("logoutBtn").addEventListener("click", async () => {
+    const b = $("logoutBtn");
+    if(CLOUD && cloudReady){ await syncNow(); }
+    const pending = CLOUD && cloudReady ? dirtyCount() : 0;
+    if(b.dataset.armed !== "1"){
+      b.dataset.armed = "1";
+      b.textContent = pending ? "⚠ " + pending + " промени не са качени — натисни пак, за да излезеш все пак" : "Изход — натисни пак (данните остават в облака)";
+      return;
+    }
+    await (CLOUD ? CLOUD.logout() : Promise.resolve());
+    [ORD_KEY, OLD_ARCH_KEY, INV_KEY, KEY, SYNC_KEY].forEach(k => { try{ localStorage.removeItem(k); }catch(e){} });
+    try{ indexedDB.deleteDatabase(DB_NAME); }catch(e){}
+    location.reload();
+  });
+
+  function startCloud(){
+    if(!CLOUD || cloudReady) return;
+    cloudReady = true;
+    $("menuAccount").hidden = false; $("menuEmail").textContent = CLOUD.email();
+    syncNow();
+    setInterval(() => { if(document.visibilityState === "visible") syncNow(); }, 60000);
+    window.addEventListener("focus", () => syncNow());
+    window.addEventListener("online", () => syncNow());
+    document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") syncNow(); });
+  }
 
   /* ---------- burger menu / pages ---------- */
   const PAGES = { work:"Разкрой", processing:"В обработка", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
@@ -1383,8 +1686,10 @@
   }
   $("burger").addEventListener("click", () => { const open = !$("menu").hidden; if(open) closeMenu(); else { $("menu").hidden = false; $("menubg").hidden = false; } });
   $("menubg").addEventListener("click", closeMenu);
-  document.querySelectorAll(".menuItem").forEach(b => b.addEventListener("click", () => showPage(b.dataset.go)));
+  document.querySelectorAll(".menuItem[data-go]").forEach(b => b.addEventListener("click", () => showPage(b.dataset.go)));
 
   renderStock();
   buildSettings();
   showPage("work");
+  if(CLOUD){ renderDataInfo(); if(window.MPR_AUTHED) startCloud(); else document.addEventListener("mpr-auth", startCloud); }
+  else syncState("local");

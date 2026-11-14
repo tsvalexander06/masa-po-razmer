@@ -102,6 +102,13 @@
   .gatebox{background:#fff;border:1px solid #cfdcf0;border-top:3px solid var(--brand);border-radius:14px;padding:22px;max-width:340px;width:100%;box-shadow:0 2px 14px rgba(30,111,244,.14);display:flex;flex-direction:column;gap:11px}
   .gatebox .gt{font-size:18px;font-weight:800;color:var(--brand)}
   .gatebox .gs{font-size:13px;color:var(--muted)}
+  .gatebox input[type=email]{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#fff;color:var(--ink)}
+  .sync{margin-left:auto;font-size:12px;font-weight:700;padding:5px 10px;border-radius:12px;background:#ecfdf5;color:#15803d;white-space:nowrap}
+  header>div{min-width:0}
+  @media (max-width:560px){ .sync{white-space:normal;font-size:11px;text-align:center;max-width:42vw;padding:4px 8px} header .t{font-size:15px} }
+  .sync.busy{background:#eef5ff;color:var(--brand-dark)} .sync.offline,.sync.error{background:#fef2f2;color:var(--bad)} .sync.local{background:#f1f5f9;color:var(--muted)}
+  .menuFoot{margin-top:auto;border-top:1px solid var(--line);padding-top:8px} .menuFoot .muted{padding:4px 20px;word-break:break-all}
+  #backupNag{max-width:1000px;margin:12px auto 0}
   .gatebox input[type=password]{padding:11px 12px;border:1px solid var(--line);border-radius:9px;font-size:16px;background:#fff;color:var(--ink)}
   .gatebox input[type=password]:focus{outline:none;border-color:var(--brand)}
   .gremember{font-size:13px;display:flex;gap:8px;align-items:center;color:var(--ink);font-weight:600}
@@ -187,6 +194,7 @@
     <div class="t">KONVEKTOMAT.STORE · Разкрой</div>
     <div class="s" id="pageName">Разкрой</div>
   </div>
+  <div class="sync noprint" id="syncState" hidden></div>
 </header>
 
 <div class="menubg" id="menubg" hidden></div>
@@ -197,9 +205,14 @@
   <button class="menuItem" data-go="archive" type="button">Архив</button>
   <button class="menuItem" data-go="stock" type="button">Фира — склад</button>
   <button class="menuItem" data-go="settings" type="button">Настройки</button>
+  <div class="menuFoot" id="menuAccount" hidden>
+    <div class="muted" id="menuEmail"></div>
+    <button class="menuItem" id="logoutBtn" type="button">Изход</button>
+  </div>
 </nav>
 
 <div class="wrap">
+  <div class="warnbox noprint" id="backupNag" hidden></div>
   <section class="page" data-page="work">
   <div class="card noprint">
     <h2>Нови поръчки</h2>
@@ -273,6 +286,16 @@
     <div class="grid" id="settings" style="margin-top:12px"></div>
     <div class="row"><button class="btn" id="resetSettings" type="button">Възстанови стойностите по подразбиране</button></div>
   </div>
+  <div class="card noprint">
+    <h2>Данни и резервно копие</h2>
+    <div class="muted" id="dataInfo"></div>
+    <div class="row">
+      <button class="btn" id="fullExport" type="button">⬇ Свали пълно резервно копие</button>
+      <button class="btn" id="fullImport" type="button">⬆ Зареди пълно копие</button>
+      <input type="file" id="fullImportFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="status" id="dataStatus"></div>
+  </div>
   </section>
 
   <!-- the open order: shown under the list in „Разкрой“ or „В обработка“ -->
@@ -299,14 +322,17 @@
 <div id="gate" class="gate">
   <div class="gatebox">
     <div class="gt">KONVEKTOMAT.STORE · Админ</div>
-    <div class="gs">Въведи парола за достъп.</div>
+    <div class="gs" id="gateSub">Въведи парола за достъп.</div>
     <div class="gs" style="font-size:11px">build __BUILD__</div>
+    <div id="gateEmailBox" hidden><input type="email" id="gateEmail" autocomplete="username" placeholder="Имейл"></div>
     <input type="password" id="gatePass" autocomplete="current-password" placeholder="Парола" autofocus>
     <label class="gremember"><input type="checkbox" id="gateRemember" checked> Запомни на това устройство</label>
     <button class="btn primary" type="button" id="gateBtn">Вход</button>
     <div class="gerr" id="gateErr"></div>
   </div>
 </div>
+<script src="cloud-config.js"></script>
+<script src="cloud.js"></script>
 <script src="gate.js"></script>
 <script src="admin.js"></script>
 </body>
