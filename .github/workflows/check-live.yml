@@ -1,0 +1,27 @@
+name: Check the live site
+
+# Started by hand: shows what the public site really serves right now (build stamp,
+# scripts, cache headers), to tell a stale browser/CDN copy from a deploy problem.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch the admin page
+        run: |
+          for u in https://inox.konvektomat.store/admin/index.html https://inox.konvektomat.store/admin/ https://tsvalexander06.github.io/admin/index.html; do
+            echo "=== $u"
+            curl -sS -m 30 -L -D headers.txt -o page.html "$u" || true
+            grep -iE '^HTTP|^cache-control|^age|^server|^cf-|^x-cache|^x-served|^via|^last-modified|^location' headers.txt || true
+            grep -oE 'build [0-9a-f]{8}[^<]*|src="[^"]+"' page.html | head -8 || true
+          done
+          echo "=== DNS"
+          getent hosts inox.konvektomat.store || true
+          dig +short inox.konvektomat.store CNAME 2>/dev/null || true
+          dig +short inox.konvektomat.store A 2>/dev/null || true
