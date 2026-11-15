@@ -3,7 +3,8 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const DEFAULTS = { topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr"];   // изпращач за Еконт (текст)
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -56,6 +57,7 @@
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} cloudDirty(); }
   function buildSettings(){
+    buildSender();
     $("settings").innerHTML = SETTINGS.map(([k,l,h]) =>
       '<label>'+esc(l)+'<input type="number" step="any" min="0" data-k="'+k+'" value="'+esc(S[k])+'"><span class="hint">'+esc(h)+'</span></label>').join("");
     $("settings").querySelectorAll("input").forEach(inp => inp.addEventListener("input", () => {
@@ -63,7 +65,17 @@
       if(!isNaN(v) && v >= 0){ S[inp.dataset.k] = v; saveSettings(); recompute(); }
     }));
   }
-  $("resetSettings").addEventListener("click", () => { S = Object.assign({}, DEFAULTS); saveSettings(); buildSettings(); recompute(); });
+  $("resetSettings").addEventListener("click", () => {
+    const keep = {}; SENDER_KEYS.forEach(k => keep[k] = S[k]);           // the sender is not a workshop setting
+    S = Object.assign({}, DEFAULTS, keep); saveSettings(); buildSettings(); recompute(); });
+  // sender for Econt: typed once, kept with the settings (and in the cloud)
+  function buildSender(){
+    [["snd-name","senderName"],["snd-phone","senderPhone"],["snd-city","senderCity"],["snd-addr","senderAddr"]].forEach(([id, k]) => {
+      const inp = $(id); if(!inp) return;
+      if(document.activeElement !== inp) inp.value = S[k] || "";
+      if(!inp.dataset.bound){ inp.dataset.bound = "1"; inp.addEventListener("input", () => { S[k] = inp.value; saveSettings(); }); }
+    });
+  }
 
   /* ---------- order data ---------- */
   const TABLE_DEFAULT = { qty:1, L:1200, D:600, H:850, thickness:1.5, legProfile:30, splashOn:true, splashH:100,
@@ -1170,7 +1182,7 @@
           '<label>Продажна цена <span class="u">(€)</span><input type="number" min="0" step="0.01" id="b-price" value="' + esc(o.price != null ? o.price : "") + '" placeholder="колко е продадена"></label>' +
           '<label>Място на доставка<input type="text" id="b-place" value="' + esc(o.place || "") + '" placeholder="адрес или обект"></label>' +
           '<label>Дата на доставка<input type="date" id="b-ddate" value="' + esc(o.deliveryDate || "") + '"></label>' +
-        '</div>' +
+        '</div>' + econtPanel(o) +
         '<div class="actions">' +
           '<button class="btn" id="bPrint" type="button">Печат</button>' +
           '<button class="btn" id="bBack" type="button">↶ Върни в Разкрой</button>' +
@@ -1191,10 +1203,78 @@
       $("b-price").addEventListener("input", e => { const v = e.target.value.trim(); o.price = v === "" ? null : +v; saveSoon(); renderLists(); });
       $("b-place").addEventListener("input", e => { o.place = e.target.value; saveSoon(); renderLists(); });
       $("b-ddate").addEventListener("input", e => { o.deliveryDate = e.target.value; saveSoon(); renderLists(); });
+      const wb = $("b-waybill");
+      if(wb) wb.addEventListener("input", e => { o.waybill = e.target.value.replace(/\s+/g, ""); saveSoon(); renderLists();
+        const tr = $("b-track"); if(tr){ tr.hidden = !o.waybill; tr.href = trackUrl(o.waybill); } });
       $("bBack").addEventListener("click", backToWork);
       $("bArchive").addEventListener("click", archiveOrder);
     }
   }
+  /* ---------- доставка с Еконт (без договор): готови данни за формата на econt.com ----------
+     Без договор Еконт не дава API, затова админът подготвя всичко за формата „Изпрати пратка“
+     на сайта им (копиране с един клик), а номерът на товарителницата се пази към поръчката. */
+  const ECONT_URL = "https://www.econt.com/services/shipment-create";
+  const trackUrl = n => "https://www.econt.com/services/track-shipment/" + encodeURIComponent(n || "");
+  // one package per table: outside size (cm, rounded up) and weight of the finished table (kg)
+  function shipInfo(o){
+    const s = 30, kgPerM = (s*s - Math.pow(Math.max(0, s - 2*S.tubeWall), 2)) * 0.00793;
+    return o.tables.map((t, i) => {
+      const r = computeTable(t, i);
+      const kg = r.sheets.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6 * (t.thickness || 1.5) * 7.93 +
+                 r.tubes.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000 * kgPerM;
+      const hTop = t.H + (t.splashOn ? (+t.splashH || 0) : 0);
+      return { i, qty:t.qty, L:Math.ceil(t.L / 10), D:Math.ceil(t.D / 10), H:Math.ceil(hTop / 10), kg:Math.ceil(kg) };
+    });
+  }
+  function econtPanel(o){
+    const d = o.delivery || null;
+    if(d && d.type === "pickup") return '<div class="econt"><h3>Доставка</h3><div class="muted">Клиентът ще вземе поръчката от вас — не е нужна товарителница.</div></div>';
+    const pk = shipInfo(o), n = pk.reduce((a, p) => a + p.qty, 0), kg = pk.reduce((a, p) => a + p.kg * p.qty, 0);
+    const sender = [S.senderName, S.senderPhone, S.senderCity, S.senderAddr];
+    const rows = [
+      ["Изпращач", S.senderName], ["Телефон на изпращача", S.senderPhone], ["Населено място (изпращач)", S.senderCity], ["Адрес на изпращача", S.senderAddr],
+      ["Получател", o.name], ["Телефон на получателя", o.phone],
+      ["Доставка", d ? (d.type === "office" ? "до офис на Еконт" : "до адрес") : ""],
+      ["Населено място (получател)", d ? d.city : ""], [d && d.type === "office" ? "Офис на Еконт" : "Адрес на получателя", d ? d.address : (o.place || "")],
+      ["Брой пакети", String(n)], ["Общо тегло (кг)", String(kg)],
+      ["Съдържание", "Маса от неръждаема стомана (инокс)" + (n > 1 ? " — " + n + " бр." : "")],
+      ["Плаща доставката", "Получателят"],
+    ];
+    const all = rows.filter(r => r[1]).map(r => r[0] + ": " + r[1]).concat(
+      pk.map(p => "Пакет — маса " + (p.i + 1) + (p.qty > 1 ? " (" + p.qty + " бр.)" : "") + ": " + p.L + " × " + p.D + " × " + p.H + " см, ≈ " + p.kg + " кг" + (p.qty > 1 ? " всеки" : ""))).join("\n");
+    const cp = (v) => v ? '<button class="btn small" type="button" data-copy="' + esc(v) + '">Копирай</button>' : '<span class="muted">—</span>';
+    return '<div class="econt"><h3>Доставка с Еконт</h3>' +
+      (sender.some(x => !String(x || "").trim()) ? '<div class="warnbox">Попълнете данните на изпращача веднъж в Настройки → „Изпращач за Еконт“.</div>' : '') +
+      (!d ? '<div class="note">Поръчката е от стара форма без адрес за доставка — използва се „Място на доставка“.</div>' : '') +
+      '<div class="tw"><table class="cut econtTbl"><tbody>' +
+        rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td><b>' + esc(r[1] || "") + '</b></td><td>' + cp(r[1]) + '</td></tr>').join("") +
+        pk.map(p => { const v = p.L + " × " + p.D + " × " + p.H + " см, ≈ " + p.kg + " кг";
+          return '<tr><td>Пакет — маса ' + (p.i + 1) + (p.qty > 1 ? ' (' + p.qty + ' бр.)' : '') + '</td><td><b>' + esc(v) + '</b>' + (p.qty > 1 ? ' <span class="muted">всеки</span>' : '') +
+            '<div class="muted">Д × Ш × В: ' + p.L + ' / ' + p.D + ' / ' + p.H + ' см · тегло ' + p.kg + ' кг</div></td><td>' + cp(v) + '</td></tr>'; }).join("") +
+      '</tbody></table></div>' +
+      '<div class="muted" style="margin-top:6px">Размерът е на сглобената маса (с борда); теглото е ориентировъчно — по разкроя.</div>' +
+      '<div class="row">' +
+        '<button class="btn" type="button" data-copy="' + esc(all) + '">Копирай всичко</button>' +
+        '<a class="btn primary" href="' + ECONT_URL + '" target="_blank" rel="noopener noreferrer">Отвори Еконт → нова пратка</a>' +
+      '</div>' +
+      '<div class="grid" style="margin-top:10px"><label>Номер на товарителницата<input type="text" id="b-waybill" value="' + esc(o.waybill || "") + '" placeholder="след като я създадете в Еконт"></label>' +
+        '<div style="align-self:end"><a class="btn" id="b-track" href="' + trackUrl(o.waybill) + '" target="_blank" rel="noopener noreferrer"' + (o.waybill ? '' : ' hidden') + '>Проследи пратката</a></div></div>' +
+      '</div>';
+  }
+  // copy buttons (anywhere in the bottom bar)
+  async function copyText(txt){
+    try{ await navigator.clipboard.writeText(txt); return true; }
+    catch(e){
+      const ta = document.createElement("textarea"); ta.value = txt; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select(); let ok = false; try{ ok = document.execCommand("copy"); }catch(e2){} ta.remove(); return ok;
+    }
+  }
+  $("bottomBar").addEventListener("click", async e => {
+    const b = e.target.closest("[data-copy]"); if(!b) return;
+    const was = b.textContent, ok = await copyText(b.dataset.copy);
+    b.textContent = ok ? "✓ Копирано" : "Не можа"; setTimeout(() => { b.textContent = was; }, 1400);
+  });
+
   function snapPrices(o){
     const P = PRICING;
     if(P){ o.clientPrice = P.client; o.cost = P.costTotal; o.costMaterials = P.costMaterials; o.weld = P.weld; o.bend = P.bend; }
@@ -1300,7 +1380,7 @@
           '<td class="size">' + esc(serTxt(o)) + '</td><td><b>' + esc(o.name || "без име") + '</b></td><td>' + esc(o.phone || "—") + '</td>' +
           '<td class="q">' + nTablesOf(o) + '</td><td class="size">' + esc(eur2(o.clientPrice != null ? o.clientPrice : clientPriceOf(o))) + '</td>' +
           '<td class="size">' + esc(eur2(o.price)) + '</td>' +
-          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + '</td>' +
+          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + (o.waybill ? '<br><span class="muted">Еконт ' + esc(o.waybill) + '</span>' : '') + '</td>' +
           '<td>' + esc(fmtDate(o.confirmedAt)) + '</td><td>' + openBtn(o.id, SEL.processing === o.id) + '</td></tr>').join("") +
         '</tbody></table></div>'
       : '<div class="empty">Няма поръчки в обработка. Поръчка идва тук, когато потвърдите разкроя ѝ в „Разкрой“.</div>';
@@ -1334,7 +1414,7 @@
           '<td class="size">' + esc(eur2(o.clientPrice)) + '</td>' +
           '<td class="size">' + esc(eur2(o.cost)) + '</td>' +
           '<td class="size">' + esc(eur2(o.price)) + '</td>' +
-          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : "") + '</td>' +
+          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : "") + (o.waybill ? '<br><span class="muted">Еконт ' + esc(o.waybill) + '</span>' : '') + '</td>' +
           '<td>' + (o.hasDoc ? '<button class="btn small" data-doc="' + esc(o.id) + '" type="button">Отвори</button>' : '—') + '</td>' +
           '<td class="acts"><button class="btn small" data-back="' + esc(o.id) + '" type="button" title="Връща поръчката в „В обработка“">↶ В обработка</button> ' +
           '<button class="btn small" data-copy="' + esc(o.id) + '" type="button" title="Нова поръчка в „Разкрой“ със същите маси">Копие в Разкрой</button> ' +

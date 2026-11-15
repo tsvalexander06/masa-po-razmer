@@ -156,6 +156,9 @@
   .bottombar{border-top-color:var(--ok)}
   .bottombar .pricebox{font-size:15px}
   .procbox b.neg{color:var(--bad)} .procbox b.pos{color:var(--ok)}
+  .econt{margin-top:14px;border-top:1px solid var(--line);padding-top:4px}
+  table.econtTbl{min-width:0} table.econtTbl td{padding:5px 8px} table.econtTbl td:first-child{color:var(--muted);white-space:nowrap} table.econtTbl td:last-child{text-align:right;width:1%}
+  a.btn{text-decoration:none}
   .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:14px}
   /* workshop print: only the print view of the open order */
   @media print{
@@ -285,6 +288,16 @@
     <div class="muted">Важат за всички поръчки на това устройство.</div>
     <div class="grid" id="settings" style="margin-top:12px"></div>
     <div class="row"><button class="btn" id="resetSettings" type="button">Възстанови стойностите по подразбиране</button></div>
+  </div>
+  <div class="card noprint">
+    <h2>Изпращач за Еконт</h2>
+    <div class="muted">Попълва се веднъж — излиза готово за копиране при всяка пратка (В обработка → „Доставка с Еконт“).</div>
+    <div class="grid" style="margin-top:12px">
+      <label>Име / фирма<input type="text" id="snd-name" placeholder="напр. Цветих 7 ООД"></label>
+      <label>Телефон<input type="text" id="snd-phone" placeholder="08XX XXX XXX"></label>
+      <label>Населено място<input type="text" id="snd-city"></label>
+      <label>Адрес<input type="text" id="snd-addr" placeholder="улица, №"></label>
+    </div>
   </div>
   <div class="card noprint">
     <h2>Данни и резервно копие</h2>
