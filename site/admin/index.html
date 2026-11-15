@@ -159,6 +159,16 @@
   .econt{margin-top:14px;border-top:1px solid var(--line);padding-top:4px}
   table.econtTbl{min-width:0} table.econtTbl td{padding:5px 8px} table.econtTbl td:first-child{color:var(--muted);white-space:nowrap} table.econtTbl td:last-child{text-align:right;width:1%}
   a.btn{text-decoration:none}
+  .edges{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+  .edge{border:1px solid var(--line);border-radius:10px;padding:10px;background:#fbfdff}
+  .edgeh{margin-bottom:6px}
+  .segrow{display:flex;gap:6px;align-items:center;margin:4px 0}
+  .segrow input[type=number]{width:72px;margin-top:0;flex:0 0 auto} .segrow select{flex:1 1 auto;min-width:0;width:auto;margin-top:0}
+  .segrow .btn.danger{flex:0 0 auto}
+  .segrow.hole{flex-wrap:wrap} .segrow.hole label{flex:1 1 90px} .segrow.hole input{width:100%}
+  .segn{font-weight:700;color:var(--muted);width:18px}
+  .dzTarget{display:flex;gap:6px;align-items:center;font-weight:600} .dzTarget select{width:auto;margin-top:0}
+  table.dzlib{min-width:560px}
   .econtCalc{margin-top:10px} .econtCalc .donebox,.econtCalc .warnbox{margin-top:8px} pre.econtRaw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:260px;overflow:auto;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px}
   .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:14px}
   /* workshop print: only the print view of the open order */
@@ -206,6 +216,7 @@
   <div class="mh">Меню</div>
   <button class="menuItem" data-go="work" type="button">Разкрой <span class="badge" id="cntWork"></span></button>
   <button class="menuItem" data-go="processing" type="button">В обработка <span class="badge" id="cntProc"></span></button>
+  <button class="menuItem" data-go="designer" type="button">Конструктор</button>
   <button class="menuItem" data-go="archive" type="button">Архив</button>
   <button class="menuItem" data-go="stock" type="button">Фира — склад</button>
   <button class="menuItem" data-go="settings" type="button">Настройки</button>
@@ -266,6 +277,17 @@
     </div>
     <div class="status" id="stockStatus"></div>
   </div>
+  </section>
+
+  <section class="page" data-page="designer" hidden>
+    <div class="card noprint">
+      <h2>Конструктор на детайли</h2>
+      <div class="muted">Тави, кутии, плотове, рамки, профили — дъно + огъвания по всяка страна. Програмата смята заготовката, линиите на огъване от ръба, изрезите в ъглите и теглото. Готовият детайл се добавя в поръчка и се разкроява заедно с масите (и с фирата от склада).</div>
+      <div id="dzBind" style="margin-top:10px"></div>
+      <div class="row" id="dzTop"></div>
+      <div id="dzLib" style="margin-top:12px"></div>
+    </div>
+    <div id="dzEditor"></div>
   </section>
 
   <section class="page" data-page="archive" hidden>

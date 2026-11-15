@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr"];   // изпращач за Еконт (текст)
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", bd90:3, bd180:2, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -17,6 +17,8 @@
     ["feet","Регулируеми крачета","мм височина; 0 = без"],
     ["stretch","Удължение на перото при огъване","мм — перото излиза с толкова по-дълго (в заготовката: перо − това)"],
     ["splashHem","Борд — подгъвка горе","мм, назад към стената; 0 = без"],
+    ["bd90","Конструктор — корекция на огъване 90°","мм на огъване (по подразбиране за детайлите)"],
+    ["bd180","Конструктор — корекция на подгъвка 180°","мм на подгъвка"],
     ["topCut","Работен плот — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["shelfCut","Долни плотове — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["tubeWall","Стена на тръбата","мм, за теглото"],
@@ -172,10 +174,12 @@
   const orderSerial = n => "№ " + String(n).padStart(4, "0");
   const serTxt = o => o && o.serial ? orderSerial(o.serial) : "без №";
   const nTablesOf = o => (o.tables || []).reduce((a, t) => a + (+t.qty || 1), 0);
+  // what an order holds, for the lists: "2", "2 + 3 дет.", "3 дет."
+  const itemsTxt = o => { const t = nTablesOf(o), d = (o.parts || []).reduce((a, p) => a + (+p.qty || 1), 0); return d ? (t ? t + " + " + d + " дет." : d + " дет.") : String(t); };
   const fmtDate = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString("bg-BG") : ""; };
   const fmtDT = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleString("bg-BG", { dateStyle:"short", timeStyle:"short" }) : ""; };
   const idsTxt = list => list.length ? list.join(", ") : "—";
-  const clientPriceOf = o => { const p = priceFor({ tables:(o.tables || []).map(normTable) }); return p ? p.total : null; };
+  const clientPriceOf = o => orderClientPrice(o);
 
   // the same order loaded twice is recognised by its client number, or by its content
   function fingerprint(o){
@@ -298,6 +302,7 @@
     const v = $("viewer");
     if(!order){ v.hidden = true; CURRENT = null; PRICING = null; return; }
     order.tables = order.tables.map(normTable);
+    order.parts = (order.parts || []).map(normPart);
     host.appendChild(v); v.hidden = false;
     setTab(TAB);
     renderHead(); renderEdit(); recompute();
@@ -353,7 +358,7 @@
       '</div></div>';
     o.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="' + i + '"><h2 class="tablehead"><span class="name">Маса ' + (i + 1) + '</span>' +
-        (o.tables.length > 1 && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
+        ((o.tables.length > 1 || o.parts.length) && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
         '<div class="tgrid"><div class="drawbox"><svg class="draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
         '<div><div class="grid">' +
         FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
@@ -371,10 +376,32 @@
         '</div>' +
         '<label style="margin-top:10px">Бележки на клиента<textarea rows="2" data-k="notes"' + dis + '>' + esc(t.notes) + '</textarea></label></div></div></div>';
     });
-    if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button></div>';
+    o.parts.forEach((p, j) => {
+      const g = partGeo(p);
+      h += '<div class="card partcard" data-j="' + j + '"><h2 class="tablehead"><span class="name">' + esc("Д" + (j + 1) + " · " + p.name) + '</span>' +
+        '<button class="btn small" data-pact="edit" type="button">' + (ro ? 'Виж в конструктора' : 'Редактирай в конструктора') + '</button>' +
+        (ro ? '' : '<button class="btn danger" data-pact="del" type="button">✕ Премахни</button>') + '</h2>' +
+        '<div class="muted">дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм · лист ' + p.th + ' мм · ' + p.qty + ' бр. · заготовка ' + fmt(g.BW) + ' × ' + fmt(g.BH) + ' мм · огъвания ' + g.bends + '</div>' +
+        '<div class="schemes" style="margin-top:8px">' + partSvg(p, g) + '</div></div>';
+    });
+    if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button>' +
+      '<button class="btn" id="addP" type="button">➕ Добави детайл (конструктор)</button></div>';
     $("order").innerHTML = h;
     o.tables.forEach((t, i) => drawTable(i));
+    document.querySelectorAll("#order .partcard").forEach(card => {
+      const j = +card.dataset.j, p = o.parts[j];
+      card.querySelector('[data-pact="edit"]').addEventListener("click", () => openDesigner({ orderId:o.id, pid:p.pid }));
+      const del = card.querySelector('[data-pact="del"]');
+      if(del) del.addEventListener("click", () => {
+        if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
+        o.parts.splice(j, 1); renderEdit(); recompute(); edited();
+      });
+    });
     if(ro) return;
+    $("addP").addEventListener("click", () => {
+      const np = normPart(JSON.parse(JSON.stringify(PART_TEMPLATES[0][1]))); o.parts.push(np); edited();
+      openDesigner({ orderId:o.id, pid:np.pid });
+    });
 
     $("o-name").addEventListener("input", e => { o.name = e.target.value; recompute(); edited(); });
     $("o-phone").addEventListener("input", e => { o.phone = e.target.value; recompute(); edited(); });
@@ -909,86 +936,105 @@
     if(!order){ CURRENT = null; PRICING = null; return; }
     const o = order;
     const per = o.tables.map((t, i) => computeTable(t, i));
+    const parts = (o.parts || []).map((p, i) => Object.assign({ p }, computePart(p, i)));
     const sheetPieces = [], tubePieces = [];
     let feet = 0;
     per.forEach((r, i) => {
-      const q = o.tables[i].qty;
+      const q = o.tables[i].qty, tth = o.tables[i].thickness || 1.5;
       feet += 4 * q;
       for(let k = 0; k < q; k++){
-        r.sheets.forEach(p => sheetPieces.push(Object.assign({}, p, { label: q > 1 ? p.label.replace(/^М(\d+)/, "М$1." + (k + 1)) : p.label })));
+        r.sheets.forEach(p => sheetPieces.push(Object.assign({ th:tth }, p, { label: q > 1 ? p.label.replace(/^М(\d+)/, "М$1." + (k + 1)) : p.label })));
         r.tubes.forEach(p => tubePieces.push(Object.assign({}, p)));
       }
     });
+    parts.forEach(r => {
+      const q = r.p.qty;
+      for(let k = 0; k < q; k++) r.sheets.forEach(p => sheetPieces.push(Object.assign({}, p, { label: q > 1 ? p.label + "." + (k + 1) : p.label })));
+    });
 
-    const th = 1.5, s = 30, types = sheetTypes();
+    const s = 30, types = sheetTypes();
     // offcuts from the store go first; a confirmed order is shown against the store as it was before confirming
     const done = o.cut;
-    const stock = (done ? INV.items.filter(x => !done.added.includes(x.id)).concat(done.used) : INV.items)
-      .filter(x => (+x.th || 1.5) === th);
-    const oc = useOffcuts(sheetPieces, stock, S.kerf);
-    const nest = packMulti(oc.rest, types, S.kerf);
-    // usable leftovers of every sheet and offcut, with the serial numbers they get when the cut is confirmed
+    const stockAll = done ? INV.items.filter(x => !done.added.includes(x.id)).concat(done.used) : INV.items;
+    // one nesting per sheet thickness (offcuts of the same thickness; the sheet price is scaled from the 1.5 mm price)
+    const ths = [...new Set(sheetPieces.map(p => +p.th || 1.5))].sort((a, b) => a - b);
+    if(!ths.length) ths.push(1.5);
     let next = INV.next, k = 0;
-    const created = [];
-    oc.used.concat(nest.sheets).forEach(sh => {
-      sh.left = leftovers(sh, S.kerf, S.offMin).map(l => {
-        const id = done ? (done.added[k++] || "?") : serial(next++);
-        const src = sh.type.offcut ? "от фира " + sh.type.offcut.id : "от лист " + sh.W + "×" + sh.H;
-        const x = Object.assign({ id, src }, l); created.push(x); return x;
+    const created = [], allUsed = [], allSheets = [], over = [], groups = [];
+    ths.forEach(th => {
+      const tt = types.map(t => Object.assign({}, t, { price:(+t.price || 0) * th / 1.5 }));
+      const oc = useOffcuts(sheetPieces.filter(p => (+p.th || 1.5) === th), stockAll.filter(x => (+x.th || 1.5) === th), S.kerf);
+      const nest = packMulti(oc.rest, tt, S.kerf);
+      // usable leftovers of every sheet and offcut, with the serial numbers they get when the cut is confirmed
+      oc.used.concat(nest.sheets).forEach(sh => {
+        sh.th = th;
+        sh.left = leftovers(sh, S.kerf, S.offMin).map(l => {
+          const id = done ? (done.added[k++] || "?") : serial(next++);
+          const src = sh.type.offcut ? "от фира " + sh.type.offcut.id : "от лист " + sh.W + "×" + sh.H;
+          const x = Object.assign({ id, src, th }, l); created.push(x); return x;
+        });
       });
+      allUsed.push(...oc.used); allSheets.push(...nest.sheets); over.push(...nest.over);
+      groups.push({ th, oc, nest, types:tt });
     });
-    CURRENT = { used:oc.used.map(sh => sh.type.offcut), created };
+    CURRENT = { used:allUsed.map(sh => sh.type.offcut), created };
 
     const bars = packBars(tubePieces, S.tubeStock, S.kerf);
     const blankArea = sheetPieces.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6;
     const tubeM = tubePieces.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000;
     const kgPerM = (s*s - Math.pow(Math.max(0, s - 2*S.tubeWall), 2)) * 0.00793;
-    const sheetKg = blankArea * th * 7.93, tubeKg = tubeM * kgPerM;
-    const nTables = o.tables.reduce((a, t) => a + t.qty, 0);
-    const money = v => nest.priced ? "€ " + v.toFixed(2) : v.toFixed(2) + " м²";
+    const sheetKg = sheetPieces.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h) * (+p.th || 1.5), 0) / 1e6 * 7.93, tubeKg = tubeM * kgPerM;
+    const nTables = o.tables.reduce((a, t) => a + t.qty, 0), nParts = parts.reduce((a, r) => a + r.p.qty, 0);
 
     /* ---- price of the order ----
        Our cost: whole sheets actually needed (offcuts are free) + tube sticks.
        Welds + bends are our labour. Client price (quote) is the shared formula. */
-    const sheetCostOurs = nest.sheets.reduce((a, sh) => a + (sh.type.offcut ? 0 : (+sh.type.price || 0)), 0);
+    const sheetCostOurs = allSheets.reduce((a, sh) => a + (sh.type.offcut ? 0 : (+sh.type.price || 0)), 0);
     const tubeCostOurs = bars.bars.length * (+S.tubePrice || 0);
     let weldOurs = 0, bendOurs = 0;
     o.tables.forEach(t => { const p = priceParts(t); weldOurs += p.weld * t.qty; bendOurs += p.bend * t.qty; });
+    parts.forEach(r => { bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
     const costMaterials = sheetCostOurs + tubeCostOurs;
     const capsOurs = o.tables.reduce((a, t) => a + priceParts(t).caps * t.qty, 0);   // тапички на краката
     const costTotal = costMaterials + weldOurs + bendOurs + capsOurs;
-    const client = priceFor({ tables:o.tables });
-    PRICING = { client:client ? client.total : 0, costMaterials, weld:weldOurs, bend:bendOurs, caps:capsOurs, costTotal };
+    PRICING = { client:orderClientPrice(o), costMaterials, weld:weldOurs, bend:bendOurs, caps:capsOurs, costTotal };
 
     // head: who and what
     const cr = fmtDT(o.created);
     let h = '<div class="card"><h2>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Поръчка — чака потвърждение на разкроя") + '</h2>' +
-      '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b> · Маси: <b>' + nTables + '</b>' +
+      '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b>' +
+        (nTables ? ' · Маси: <b>' + nTables + '</b>' : '') + (nParts ? ' · Детайли: <b>' + nParts + '</b>' : '') +
         (deliveryText(o.delivery) ? '<br>Доставка: <b>' + esc(deliveryText(o.delivery)) + '</b>' : '') + '</div>' +
       '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
 
     // materials for the whole order
-    h += '<div class="card summary"><h2>Материали за цялата поръчка (' + nTables + (nTables === 1 ? ' маса' : ' маси') + ')</h2><div class="totals">';
-    if(oc.used.length) h += tot("Фира от склада", oc.used.length + " бр.", oc.used.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + ")").join(", "));
-    types.forEach(t => {
-      const used = nest.sheets.filter(sh => sh.type.name === t.name);
-      if(!used.length) return;
-      const util = used.reduce((a, sh) => a + sh.placed.reduce((b, p) => b + p.w * p.h, 0), 0) / (used.length * t.W * t.H);
-      h += tot("Нови листове " + t.name + " мм, " + th + " мм", used.length + " бр.", "използване " + Math.round(util * 100) + "%");
+    const what = [nTables ? nTables + (nTables === 1 ? ' маса' : ' маси') : '', nParts ? nParts + (nParts === 1 ? ' детайл' : ' детайла') : ''].filter(Boolean).join(', ') || 'празна';
+    h += '<div class="card summary"><h2>Материали за цялата поръчка (' + what + ')</h2><div class="totals">';
+    if(allUsed.length) h += tot("Фира от склада", allUsed.length + " бр.", allUsed.map(sh => sh.type.offcut.id + " (" + lw(sh.type.offcut) + (sh.th !== 1.5 ? ", " + sh.th + " мм" : "") + ")").join(", "));
+    groups.forEach(gr => {
+      gr.types.forEach(t => {
+        const used = gr.nest.sheets.filter(sh => sh.type.name === t.name);
+        if(!used.length) return;
+        const util = used.reduce((a, sh) => a + sh.placed.reduce((b, p) => b + p.w * p.h, 0), 0) / (used.length * t.W * t.H);
+        h += tot("Нови листове " + t.name + " мм, " + gr.th + " мм", used.length + " бр.", "използване " + Math.round(util * 100) + "%" + (gr.th !== 1.5 ? " · цена ≈ " + eur2(t.price) + "/бр. (от цената за 1.5 мм)" : ""));
+      });
     });
-    if(!nest.sheets.length) h += tot("Нови листове " + th + " мм", "0 бр.", oc.used.length ? "всичко е от фира" : "няма детайли от лист");
+    if(!allSheets.length) h += tot("Нови листове", "0 бр.", allUsed.length ? "всичко е от фира" : "няма детайли от лист");
     h += tot("Нова фира за склада", created.length + " бр.", created.length ? created.map(c => c.id + " (" + lw(c) + ")").join(", ") : "няма годни остатъци") +
-      tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.", "общо " + tubeM.toFixed(2) + " м — само крака") +
-      tot(S.feet ? "Регулируеми крачета" : "Тапи за краката", feet + " бр.", "по 4 на маса") +
-      tot("Тегло на готовите маси (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг", "лист " + Math.round(sheetKg) + " кг + тръба " + Math.round(tubeKg) + " кг") +
+      (tubePieces.length ? tot("Тръба " + s + "×" + s + " (пръти по " + fmt(S.tubeStock / 1000) + " м)", bars.bars.length + " бр.", "общо " + tubeM.toFixed(2) + " м — само крака") +
+        tot(S.feet ? "Регулируеми крачета" : "Тапи за краката", feet + " бр.", "по 4 на маса") : '') +
+      tot("Тегло (ориентировъчно)", Math.round(sheetKg + tubeKg) + " кг", "лист " + Math.round(sheetKg) + " кг" + (tubeKg ? " + тръба " + Math.round(tubeKg) + " кг" : "")) +
       '</div>';
-    if(nest.sheets.length && types.length > 1){
-      h += '<div class="compare"><b>Нови листове — ' + (nest.priced ? 'цена' : 'площ') + ':</b> избрано ' + nest.sheets.length + ' бр., ' + money(nest.cost) +
-        nest.singles.map(x => ' · само ' + x.name + ': ' + x.n + ' бр., ' + money(x.cost)).join("") +
-        (nest.priced ? '' : '<br><span class="muted">Въведете цените на листовете в настройките, за да се сравнява по цена вместо по площ.</span>') + '</div>';
-    }
-    if(nest.over.length) h += '<div class="warnbox">⚠ Не се събират на нито един лист (нужна е снадка или по-голям лист): ' +
-      nest.over.map(p => esc(p.label) + ' ' + fmt(p.w) + '×' + fmt(p.h)).join(", ") + '</div>';
+    groups.forEach(gr => {
+      const nest = gr.nest, money = v => nest.priced ? "€ " + v.toFixed(2) : v.toFixed(2) + " м²";
+      if(nest.sheets.length && gr.types.length > 1){
+        h += '<div class="compare"><b>Нови листове' + (groups.length > 1 ? ' ' + gr.th + ' мм' : '') + ' — ' + (nest.priced ? 'цена' : 'площ') + ':</b> избрано ' + nest.sheets.length + ' бр., ' + money(nest.cost) +
+          nest.singles.map(x => ' · само ' + x.name + ': ' + x.n + ' бр., ' + money(x.cost)).join("") +
+          (nest.priced ? '' : '<br><span class="muted">Въведете цените на листовете в настройките, за да се сравнява по цена вместо по площ.</span>') + '</div>';
+      }
+    });
+    if(over.length) h += '<div class="warnbox">⚠ Не се събират на нито един лист (нужна е снадка или по-голям лист): ' +
+      over.map(p => esc(p.label) + ' ' + fmt(p.w) + '×' + fmt(p.h)).join(", ") + '</div>';
     if(bars.over.length) h += '<div class="warnbox">⚠ По-дълги от прът ' + S.tubeStock + ' мм: ' +
       bars.over.map(p => esc(p.label) + ' ' + fmt(p.len)).join(", ") + '</div>';
     h += '</div>';
@@ -1017,11 +1063,28 @@
         '<h3>Схема на огъванията</h3><div class="schemes">' + r.schemes.map(foldSvg).join("") + '</div></div>';
     });
 
-    if(oc.used.length || nest.sheets.length){
+    // one card per designed part: blank, bends from the edge, scheme
+    parts.forEach((r, i) => {
+      const p = r.p, q = p.qty;
+      h += '<div class="card"><h2>' + esc(r.tag + " · " + p.name) + (q > 1 ? ' — ' + q + ' бр.' : '') + '</h2><div class="printsum">' +
+        '<b>дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм</b> · лист ' + p.th + ' мм · брой: <b>' + q + '</b> · огъвания: ' + r.g.bends + ' · тегло ≈ ' + r.g.kg.toFixed(1) + ' кг/бр.' +
+        (p.notes.trim() ? '<br><b>Бележка:</b> ' + esc(p.notes) : '') + '</div>' +
+        r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
+        '<h3>Детайл за рязане' + (q > 1 ? ' — ' + q + ' бр.' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
+        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
+          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") + '</tbody></table></div>' +
+        (r.bendRows.length ? '<h3>Огъвания — линии от ръба на заготовката (мм)</h3><div class="tw"><table class="cut bends"><thead><tr><th>Страна</th><th>Профил (външни размери)</th><th>Линии на огъване от ръба</th></tr></thead><tbody>' +
+          r.bendRows.map(b => '<tr><td>' + esc(b.side) + '</td><td>' + esc(b.profile) + '</td><td class="size">' + esc(b.lines) + '</td></tr>').join("") + '</tbody></table></div>' : '') +
+        '<h3>Схема</h3><div class="schemes">' + partSvg(p, r.g) + '</div></div>';
+    });
+
+    if(allUsed.length || allSheets.length){
+      const thTxt = sh => sh.th !== 1.5 ? " · " + sh.th + " мм" : "";
       h += '<div class="card sheetscard"><h2>Разкрой на листовете</h2><div class="muted">Ориентировъчно разположение на заготовките (с ' + S.kerf +
         ' мм за рязане между тях). ↻ = завъртяна. Зелено = нова фира за склада.</div><div class="sheets" style="margin-top:10px">' +
-        oc.used.map(sh => sheetSvg(sh, "Фира " + sh.type.offcut.id)).join("") +
-        nest.sheets.map((sh, i) => sheetSvg(sh, "Лист " + (i + 1))).join("") + '</div></div>';
+        allUsed.map(sh => sheetSvg(sh, "Фира " + sh.type.offcut.id + thTxt(sh))).join("") +
+        allSheets.map((sh, i) => sheetSvg(sh, "Лист " + (i + 1) + thTxt(sh))).join("") + '</div></div>';
     }
     if(bars.bars.length){
       h += '<div class="card"><h2>Рязане на тръбите</h2><div class="muted">Пръти по ' + S.tubeStock + ' мм, ' + S.kerf + ' мм загуба на рез.</div>' +
@@ -1373,7 +1436,7 @@
     INV.items = INV.items.filter(x => !usedIds.includes(x.id));
     const added = cur.created.map((c, i) => {
       const id = serial(firstOff + i);
-      INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:1.5, from:c.src + " · " + label, added:now });
+      INV.items.push({ id, w:Math.max(c.w, c.h), h:Math.min(c.w, c.h), th:+c.th || 1.5, from:c.src + " · " + label, added:now });
       return id;
     });
     o.cut = { at:now, used:cur.used.map(x => Object.assign({}, x)), added };
@@ -1440,7 +1503,7 @@
       ? '<div class="tw"><table class="cut list"><thead><tr><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Заредена</th><th>Файл</th><th></th></tr></thead><tbody>' +
         w.map(o => '<tr class="' + (SEL.work === o.id ? "sel" : "") + '" data-row="' + esc(o.id) + '">' +
           '<td><b>' + esc(o.name || "без име") + '</b>' + (o.serial ? ' <span class="muted">' + esc(orderSerial(o.serial)) + '</span>' : '') + '</td>' +
-          '<td>' + esc(o.phone || "—") + '</td><td class="q">' + nTablesOf(o) + '</td>' +
+          '<td>' + esc(o.phone || "—") + '</td><td class="q">' + itemsTxt(o) + '</td>' +
           '<td class="size">' + esc(eur2(clientPriceOf(o))) + '</td><td>' + esc(fmtDT(o.addedAt)) + '</td>' +
           '<td class="muted">' + esc(o.source || "ръчно") + '</td><td>' + openBtn(o.id, SEL.work === o.id) + '</td></tr>').join("") +
         '</tbody></table></div>'
@@ -1449,7 +1512,7 @@
       ? '<div class="tw"><table class="cut list"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Продажна</th><th>Доставка</th><th>Потвърдена</th><th></th></tr></thead><tbody>' +
         p.map(o => '<tr class="' + (SEL.processing === o.id ? "sel" : "") + '" data-row="' + esc(o.id) + '">' +
           '<td class="size">' + esc(serTxt(o)) + '</td><td><b>' + esc(o.name || "без име") + '</b></td><td>' + esc(o.phone || "—") + '</td>' +
-          '<td class="q">' + nTablesOf(o) + '</td><td class="size">' + esc(eur2(o.clientPrice != null ? o.clientPrice : clientPriceOf(o))) + '</td>' +
+          '<td class="q">' + itemsTxt(o) + '</td><td class="size">' + esc(eur2(o.clientPrice != null ? o.clientPrice : clientPriceOf(o))) + '</td>' +
           '<td class="size">' + esc(eur2(o.price)) + '</td>' +
           '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + (o.waybill ? '<br><span class="muted">Еконт ' + esc(o.waybill) + '</span>' : '') + '</td>' +
           '<td>' + esc(fmtDate(o.confirmedAt)) + '</td><td>' + openBtn(o.id, SEL.processing === o.id) + '</td></tr>').join("") +
@@ -1481,7 +1544,7 @@
           '<td>' + esc(o.name || "—") + '</td>' +
           '<td>' + esc(o.phone || "—") + '</td>' +
           '<td>' + esc(fmtDate(o.archivedAt || o.savedAt)) + '</td>' +
-          '<td class="q">' + nTablesOf(o) + '</td>' +
+          '<td class="q">' + itemsTxt(o) + '</td>' +
           '<td class="size">' + esc(eur2(o.clientPrice)) + '</td>' +
           '<td class="size">' + esc(eur2(o.cost)) + '</td>' +
           '<td class="size">' + esc(eur2(o.price)) + '</td>' +
@@ -1592,11 +1655,12 @@
           if(i >= 0) INV.items[i] = d; else INV.items.push(d); });
         if(drops.length) INV.items = INV.items.filter(o => !drops.includes(o.id));
         saveInvLocal(); } },
-    kv:{ table:"kv", rows:() => [{ id:"settings", data:S }, { id:"invDone", data:INV.done }],
+    kv:{ table:"kv", rows:() => [{ id:"settings", data:S }, { id:"invDone", data:INV.done }, { id:"partsLib", data:LIB }],
       apply:(takes) => {
         takes.forEach(r => {
           if(r.id === "settings"){ S = Object.assign({}, DEFAULTS, r.data || {}); saveSettingsLocal(); }
-          if(r.id === "invDone"){ INV.done = r.data || {}; saveInvLocal(); } }); } },
+          if(r.id === "invDone"){ INV.done = r.data || {}; saveInvLocal(); }
+          if(r.id === "partsLib"){ LIB = { items:((r.data && r.data.items) || []).map(normPart) }; try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} } }); } },
   };
   const rowData = (name, id) => { const r = COLS[name].rows().find(x => x.id === id); return r ? r.data : undefined; };
   function dirtyCount(){
@@ -1705,7 +1769,7 @@
   // redraw what another device changed (only what is affected)
   function afterRemoteChange(ch){
     if(!ch.orders.length && !ch.offcuts && !ch.kv) return;
-    if(ch.kv){ buildSettings(); }
+    if(ch.kv){ buildSettings(); if(PAGE === "designer") renderDzLib(); }
     if(ch.offcuts) renderStock();
     renderLists();
     if(PAGE === "archive") renderArchive();
@@ -1841,8 +1905,332 @@
     document.addEventListener("visibilitychange", () => { if(document.visibilityState === "visible") syncNow(); });
   }
 
+  /* ---------- Конструктор: детайли от лист (тави, кутии, плотове, Z-профили...) ----------
+     Детайл = дъно L × W (външни размери) + верига огъвания по всяка от 4-те страни.
+     Всеки сегмент от веригата: дължина (външен размер, както на чертеж) и посока в сечението:
+     ↑ нагоре, ↓ надолу, → навън, ← навътре. Перпендикулярна посока = огъване 90°, обратна = подгъвка 180°.
+     Заготовка = дъно + сегментите − корекция за всяко огъване (Настройки: 90° и 180°; или за детайла).
+     В ъглите, където и двете съседни страни имат огъвания, се изрязва квадрат (широчина × широчина на перата). */
+  const PART_DIRS = { up:"↑ нагоре", down:"↓ надолу", out:"→ навън", in:"← навътре" };
+  const PART_EDGES = [["front","Отпред"],["back","Отзад"],["left","Ляво"],["right","Дясно"]];
+  const isVertDir = d => d === "up" || d === "down";
+  const bendAngle = (a, b) => isVertDir(a) !== isVertDir(b) ? 90 : (a === b ? 0 : 180);
+  const newPid = () => "p" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  function normPart(x){
+    const p = x || {};
+    const seg = s => ({ len:Math.max(0, +s.len || 0), dir:PART_DIRS[s.dir] ? s.dir : "up" });
+    const edges = {};
+    PART_EDGES.forEach(([e]) => { edges[e] = ((p.edges && p.edges[e]) || []).map(seg); });
+    return { pid:p.pid || newPid(), name:String(p.name || "Детайл"), qty:Math.max(1, Math.round(+p.qty || 1)), th:+p.th > 0 ? +p.th : 1.5,
+      L:Math.max(0, +p.L || 0), W:Math.max(0, +p.W || 0), bd90:Math.max(0, +p.bd90 || 0), bd180:Math.max(0, +p.bd180 || 0),
+      edges, holes:(p.holes || []).map(h => ({ w:Math.max(0, +h.w || 0), h:Math.max(0, +h.h || 0), x:h.x === "" || h.x == null ? null : +h.x, y:h.y === "" || h.y == null ? null : +h.y })),
+      notes:String(p.notes || "") };
+  }
+  function partGeo(p){
+    const b90 = +p.bd90 > 0 ? +p.bd90 : (+S.bd90 || 0), b180 = +p.bd180 > 0 ? +p.bd180 : (+S.bd180 || 0);
+    const ded = a => a === 180 ? b180 : a === 90 ? b90 : 0;
+    const warns = [], ch = {};
+    PART_EDGES.forEach(([e, name]) => {
+      const segs = (p.edges[e] || []).filter(s => +s.len > 0);
+      let prev = "out";
+      const angles = segs.map(s => { const a = bendAngle(prev, s.dir); prev = s.dir; return a; });
+      angles.forEach((a, i) => { if(a === 0) warns.push(name + ": сегмент " + (i + 1) + " е в същата посока като " + (i ? "предишния" : "дъното") + " — няма огъване (слейте ги)."); });
+      const flats = segs.map((s, i) => +s.len - ded(angles[i]) / 2 - (i < segs.length - 1 ? ded(angles[i + 1]) / 2 : 0));
+      flats.forEach((f, i) => { if(f <= 0) warns.push(name + ": сегмент " + (i + 1) + " (" + segs[i].len + " мм) е по-къс от корекцията за огъване."); });
+      const flat = flats.reduce((a, b) => a + b, 0);
+      const lines = []; let c = 0;
+      segs.forEach((s, i) => { lines.push({ at:c, fromEdge:0, angle:angles[i], dir:s.dir }); c += flats[i]; });
+      lines.forEach(l => { l.fromEdge = flat - l.at; });
+      ch[e] = { name, segs, angles, flats, flat, lines, baseLoss:segs.length ? ded(angles[0]) / 2 : 0, bends:segs.length };
+    });
+    const Lf = p.L - ch.left.baseLoss - ch.right.baseLoss, Wf = p.W - ch.front.baseLoss - ch.back.baseLoss;
+    const BW = Lf + ch.left.flat + ch.right.flat, BH = Wf + ch.front.flat + ch.back.flat;
+    const corner = (a, b) => (ch[a].flat > 0 && ch[b].flat > 0) ? [ch[a].flat, ch[b].flat] : null;   // [x, y] size of the cut
+    const notches = { bl:corner("left", "front"), br:corner("right", "front"), tl:corner("left", "back"), tr:corner("right", "back") };
+    const holes = p.holes.filter(h => h.w > 0 && h.h > 0).map(h => {
+      const x = h.x == null ? (Lf - h.w) / 2 : h.x, y = h.y == null ? (Wf - h.h) / 2 : h.y;
+      if(x < 0 || y < 0 || x + h.w > Lf || y + h.h > Wf) warns.push("Отвор " + h.w + " × " + h.h + " мм излиза извън дъното.");
+      return { w:h.w, h:h.h, x, y };
+    });
+    const area = BW * BH - Object.values(notches).filter(Boolean).reduce((a, n) => a + n[0] * n[1], 0) - holes.reduce((a, h) => a + h.w * h.h, 0);
+    if(p.L <= 0 || p.W <= 0) warns.push("Въведете размерите на дъното.");
+    const bends = PART_EDGES.reduce((a, [e]) => a + ch[e].bends, 0);
+    return { ch, Lf, Wf, BW, BH, notches, holes, area, kg:Math.max(0, area) / 1e6 * p.th * 7.93, bends, warns, b90, b180 };
+  }
+  const profileTxt = c => c.segs.map((s, i) => s.len + " " + PART_DIRS[s.dir].split(" ")[0] + (c.angles[i] === 180 ? " (подгъвка 180°)" : "")).join(" · ");
+
+  // flat blank (top view) with bend lines, corner cuts and openings + a cross-section of every bent edge
+  function partSvg(p, g){
+    const W = g.BW, H = g.BH; if(!(W > 0 && H > 0)) return "";
+    const k = Math.min(560 / W, 300 / H), X0 = 70, Y0 = 46;
+    const x = v => (X0 + v * k).toFixed(1), y = v => (Y0 + v * k).toFixed(1);
+    const L = g.ch.left.flat, R = g.ch.right.flat, T = g.ch.back.flat, B = g.ch.front.flat;
+    const xa = L, xb = L + g.Lf, ya = T, yb = T + g.Wf, n = g.notches;
+    const pts = [];
+    if(n.tl) pts.push([xa, 0]); else pts.push([0, 0]);
+    if(n.tr) pts.push([xb, 0], [xb, ya], [W, ya]); else pts.push([W, 0]);
+    if(n.br) pts.push([W, yb], [xb, yb], [xb, H]); else pts.push([W, H]);
+    if(n.bl) pts.push([xa, H], [xa, yb], [0, yb]); else pts.push([0, H]);
+    if(n.tl) pts.push([0, ya], [xa, ya]);
+    let s = '<polygon points="' + pts.map(q => x(q[0]) + "," + y(q[1])).join(" ") + '" fill="#eef5ff" stroke="#1e3a5f" stroke-width="2"/>';
+    const st = a => a === 180 ? 'stroke="#ea580c" stroke-width="2" stroke-dasharray="3 3"' : 'stroke="#dc2626" stroke-width="2" stroke-dasharray="7 4"';
+    const ln = (x1, y1, x2, y2, a) => '<line x1="' + x(x1) + '" y1="' + y(y1) + '" x2="' + x(x2) + '" y2="' + y(y2) + '" ' + st(a) + '/>';
+    g.ch.front.lines.forEach(l => s += ln(xa, yb + l.at, xb, yb + l.at, l.angle));
+    g.ch.back.lines.forEach(l => s += ln(xa, ya - l.at, xb, ya - l.at, l.angle));
+    g.ch.left.lines.forEach(l => s += ln(xa - l.at, ya, xa - l.at, yb, l.angle));
+    g.ch.right.lines.forEach(l => s += ln(xb + l.at, ya, xb + l.at, yb, l.angle));
+    g.holes.forEach(h => s += '<rect x="' + x(xa + h.x) + '" y="' + y(yb - h.y - h.h) + '" width="' + (h.w * k).toFixed(1) + '" height="' + (h.h * k).toFixed(1) +
+      '" fill="#fff" stroke="#7c3aed" stroke-width="1.5" stroke-dasharray="5 3"/><text x="' + x(xa + h.x + h.w / 2) + '" y="' + y(yb - h.y - h.h / 2) +
+      '" text-anchor="middle" font-size="11" fill="#6d28d9">отвор ' + fmt(h.w) + '×' + fmt(h.h) + '</text>');
+    const t = (tx, ty, str, o) => '<text x="' + tx + '" y="' + ty + '" ' + (o || '') + '>' + str + '</text>';
+    s += t(x(xa + g.Lf / 2), (+y(ya) + 16).toFixed(1), "дъно " + fmt(p.L) + " × " + fmt(p.W), 'text-anchor="middle" font-size="12" font-weight="700" fill="#15223a"');
+    s += t(x(W / 2), Y0 - 22, "заготовка " + fmt(W) + " мм", 'text-anchor="middle" font-size="13" font-weight="700" fill="#15223a"');
+    s += '<line x1="' + x(0) + '" y1="' + (Y0 - 14) + '" x2="' + x(W) + '" y2="' + (Y0 - 14) + '" stroke="#475569"/>';
+    s += t(X0 - 18, y(H / 2), "заготовка " + fmt(H) + " мм", 'text-anchor="middle" font-size="13" font-weight="700" fill="#15223a" transform="rotate(-90 ' + (X0 - 18) + ' ' + y(H / 2) + ')"');
+    s += t(x(W / 2), (+y(H) + 15).toFixed(1), "ОТПРЕД", 'text-anchor="middle" font-size="11" fill="#64748b"');
+    const topH = Y0 + H * k + 30;
+    // cross-sections, side by side under the blank
+    const edgesBent = PART_EDGES.filter(([e]) => g.ch[e].segs.length);
+    const maxSeg = Math.max(10, ...edgesBent.flatMap(([e]) => g.ch[e].segs.map(q => q.len)));
+    // segments in proportion, but never too short to read (like the table fold schemes)
+    const kp = Math.min(2.4, 100 / maxSeg), segPx = v => Math.max(24, v * kp), boxW = 200, boxH = 290;
+    let cs = "";
+    edgesBent.forEach(([e, name], i) => {
+      const c = g.ch[e], ox = 20 + i * boxW, oy = topH + 20, cx0 = ox + 70, cy0 = oy + 145;
+      let px = cx0, py = cy0, path = 'M' + (cx0 - 55) + ',' + cy0 + ' L' + cx0 + ',' + cy0, labels = "";
+      let prev = "out";
+      c.segs.forEach((sg, j) => {
+        const v = { out:[1, 0], in:[-1, 0], up:[0, -1], down:[0, 1] }[sg.dir];
+        if(bendAngle(prev, sg.dir) === 180){ const off = isVertDir(sg.dir) ? [6, 0] : [0, -6]; px += off[0]; py += off[1]; path += ' L' + px + ',' + py; }
+        const nx = px + v[0] * segPx(sg.len), ny = py + v[1] * segPx(sg.len);
+        path += ' L' + nx.toFixed(1) + ',' + ny.toFixed(1);
+        // vertical: number beside the segment (on the side away from the base); horizontal: above or below it
+        const side = sg.dir === "in" ? 1 : -1;
+        const mx = (px + nx) / 2 + (isVertDir(sg.dir) ? 9 : 0), my = (py + ny) / 2 + (isVertDir(sg.dir) ? 4 : (side > 0 ? 15 : -8));
+        labels += '<text x="' + mx.toFixed(1) + '" y="' + my.toFixed(1) + '" font-size="12" font-weight="700" fill="#1552c7"' + (isVertDir(sg.dir) ? '' : ' text-anchor="middle"') + '>' + fmt(sg.len) + '</text>';
+        px = nx; py = ny; prev = sg.dir;
+      });
+      cs += '<text x="' + ox + '" y="' + (oy + 4) + '" font-size="12" font-weight="700" fill="#15223a">' + esc(name) + ' — сечение</text>' +
+        '<path d="' + path + '" fill="none" stroke="#15223a" stroke-width="3.5" stroke-linejoin="miter"/>' + labels +
+        '<text x="' + (cx0 - 55) + '" y="' + (cy0 + 16) + '" font-size="10" fill="#64748b">дъно</text>';
+    });
+    const VW = Math.max(X0 + W * k + 30, 20 + edgesBent.length * boxW), VH = topH + (edgesBent.length ? boxH : 0) + 24;
+    const legend = '<line x1="20" y1="' + (VH - 10) + '" x2="54" y2="' + (VH - 10) + '" ' + st(90) + '/><text x="60" y="' + (VH - 6) + '" font-size="11" fill="#334155">огъване 90°</text>' +
+      '<line x1="160" y1="' + (VH - 10) + '" x2="194" y2="' + (VH - 10) + '" ' + st(180) + '/><text x="200" y="' + (VH - 6) + '" font-size="11" fill="#334155">подгъвка 180°</text>';
+    return '<figure class="scheme"><svg viewBox="0 0 ' + VW.toFixed(0) + ' ' + VH.toFixed(0) + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">' +
+      s + cs + legend + '</svg><figcaption>' + esc(p.name) + ' · заготовка ' + fmt(W) + ' × ' + fmt(H) + ' мм · горе = отзад · сеченията: размерите са външни; дъното е вляво от всяко сечение · огъванията в пропорция, дъното не е в мащаб</figcaption></figure>';
+  }
+  // the cut-list entry of one part (like computeTable for a table)
+  function computePart(p, idx){
+    const g = partGeo(p), tag = "Д" + (idx + 1);
+    const n = g.notches, cuts = [["отпред ляво", n.bl], ["отпред дясно", n.br], ["отзад ляво", n.tl], ["отзад дясно", n.tr]].filter(c => c[1]);
+    const note = "Готов: дъно " + fmt(p.L) + " × " + fmt(p.W) + " мм. " +
+      PART_EDGES.filter(([e]) => g.ch[e].segs.length).map(([e, name]) => name + ": " + profileTxt(g.ch[e])).join("; ") + ". " +
+      (cuts.length ? "Изрези в ъглите: " + cuts.map(c => c[0] + " " + fmt(c[1][0]) + "×" + fmt(c[1][1])).join(", ") + " мм. " : "") +
+      (g.holes.length ? "Отвори: " + g.holes.map(h => fmt(h.w) + "×" + fmt(h.h) + " (на " + fmt(h.x) + " от ляво, " + fmt(h.y) + " от предната линия)").join(", ") + ". " : "") +
+      "Корекция: " + fmt(g.b90) + " мм/90°" + (g.ch && Object.values(g.ch).some(c => c.angles.includes(180)) ? ", " + fmt(g.b180) + " мм/180°" : "") + ". Виж схемата.";
+    const rows = [{ kind:"sheet", part:p.name, mat:"Лист инокс " + p.th + " мм", size:fmt(g.BW) + " × " + fmt(g.BH), qty:1, note }];
+    const bendRows = PART_EDGES.filter(([e]) => g.ch[e].segs.length).map(([e, name]) => {
+      const c = g.ch[e];
+      return { side:name, profile:profileTxt(c), lines:c.lines.slice().reverse().map(l => fmt(l.fromEdge) + (l.angle === 180 ? " (180°)" : "")).join(" → ") };
+    });
+    return { g, tag, rows, bendRows, sheets:[{ label:tag, w:g.BW, h:g.BH, th:p.th }], warns:g.warns };
+  }
+  // client price of a part: like the tables — blank area + bends, with the markup (no welds)
+  function partPrice(p){
+    const g = partGeo(p);
+    return (Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) + g.bends * PRICE.bend) * (1 + PRICE.markupPct / 100) * p.qty;
+  }
+  function orderClientPrice(o){
+    const t = (o.tables && o.tables.length) ? priceFor({ tables:o.tables.map(normTable) }) : null;
+    const parts = (o.parts || []).map(normPart).reduce((a, p) => a + partPrice(p), 0);
+    return (t ? t.total : 0) + parts;
+  }
+
+  /* ---------- Конструктор: страница ----------
+     Библиотека от детайли (пази се и в облака) + редактор. Детайл от библиотеката се добавя като копие в поръчка;
+     детайл от поръчка се редактира тук направо (докато разкроят не е потвърден). */
+  var LIB_KEY = "mpr-admin-parts-v1";
+  var LIB = (function(){ try{ const d = JSON.parse(localStorage.getItem(LIB_KEY) || "null"); if(d && Array.isArray(d.items)) return { items:d.items.map(normPart) }; }catch(e){} return { items:[] }; })();
+  function saveLib(){ try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} cloudDirty(); }
+  const sideAll = segs => ({ front:segs, back:segs, left:segs, right:segs });
+  const PART_TEMPLATES = [
+    ["Тава", { name:"Тава", L:1400, W:300, edges:sideAll([{ len:50, dir:"up" }]) }],
+    ["Плот с канти", { name:"Плот", L:1400, W:600, edges:{ front:[{ len:30, dir:"down" }, { len:12, dir:"in" }], back:[{ len:100, dir:"up" }, { len:20, dir:"out" }],
+      left:[{ len:30, dir:"down" }, { len:12, dir:"in" }], right:[{ len:30, dir:"down" }, { len:12, dir:"in" }] } }],
+    ["Рамка с отвор", { name:"Рамка", L:1580, W:550, edges:sideAll([{ len:30, dir:"down" }, { len:10, dir:"in" }]), holes:[{ w:1470, h:350 }] }],
+    ["Z-профил", { name:"Z-профил", L:1400, W:20, edges:{ front:[{ len:30, dir:"down" }], back:[{ len:30, dir:"up" }] } }],
+    ["Празен детайл", { name:"Детайл", L:1000, W:500 }],
+  ];
+  var DZ = { p:null, bind:null, libId:null };          // bind = { orderId, pid } when the part belongs to an order
+  function dzPart(){
+    if(!DZ.bind) return DZ.p;
+    const o = findOrder(DZ.bind.orderId), i = o && o.parts ? o.parts.findIndex(p => p.pid === DZ.bind.pid) : -1;
+    if(i < 0) return null;
+    if(!o.parts[i].edges || !o.parts[i].edges.front) o.parts[i] = normPart(o.parts[i]);
+    return o.parts[i];
+  }
+  function openDesigner(bind){ DZ = { p:null, bind:bind || null, libId:null }; showPage("designer"); }
+  function dzChanged(structural){
+    if(DZ.bind){ saveSoon(); renderLists(); }
+    if(structural) renderDesigner(); else renderDzPreview();
+  }
+
+  function renderDzLib(){
+    const el = $("dzLib"); if(!el) return;
+    el.innerHTML = LIB.items.length
+      ? '<div class="tw"><table class="cut list dzlib"><thead><tr><th>Библиотека</th><th>Дъно (мм)</th><th>Заготовка (мм)</th><th>Лист</th><th></th></tr></thead><tbody>' +
+        LIB.items.map(p => { const g = partGeo(p);
+          return '<tr class="' + (DZ.libId === p.pid && !DZ.bind ? "sel" : "") + '"><td><b>' + esc(p.name) + '</b></td><td class="size">' + fmt(p.L) + ' × ' + fmt(p.W) + '</td><td class="size">' + fmt(g.BW) + ' × ' + fmt(g.BH) +
+            '</td><td>' + p.th + ' мм</td><td class="acts"><button class="btn small" data-libopen="' + esc(p.pid) + '" type="button">Отвори</button> <button class="btn danger" data-libdel="' + esc(p.pid) + '" type="button">Изтрий</button></td></tr>'; }).join("") +
+        '</tbody></table></div>'
+      : '<div class="muted">Библиотеката е празна — запазените детайли ще се появят тук (и на всички устройства).</div>';
+    el.querySelectorAll("[data-libopen]").forEach(b => b.addEventListener("click", () => {
+      const it = LIB.items.find(p => p.pid === b.dataset.libopen); if(!it) return;
+      DZ = { p:normPart(JSON.parse(JSON.stringify(it))), bind:null, libId:it.pid }; renderDesigner();
+    }));
+    el.querySelectorAll("[data-libdel]").forEach(b => b.addEventListener("click", () => {
+      if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Сигурно? Натисни пак"; return; }
+      LIB.items = LIB.items.filter(p => p.pid !== b.dataset.libdel); if(DZ.libId === b.dataset.libdel) DZ.libId = null;
+      saveLib(); renderDesigner();
+    }));
+  }
+
+  function renderDesigner(){
+    if(!$("dzEditor")) return;
+    const p = dzPart(), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    if(DZ.bind && !p){ DZ = { p:null, bind:null, libId:null }; }
+    $("dzBind").innerHTML = bound && p ? '<div class="note">Детайл от поръчка <b>' + esc(serTxt(bound) + (bound.name ? " · " + bound.name : "")) + '</b>' +
+      (ro ? ' — разкроят е потвърден, затова е само за преглед.' : ' — промените се записват направо в поръчката.') +
+      ' <button class="btn small" id="dzBack" type="button">← Към поръчката</button></div>' : '';
+    $("dzTop").innerHTML = bound ? '' : '<span class="muted">Нов детайл от шаблон:</span> ' + PART_TEMPLATES.map((t, i) => '<button class="btn small" data-tpl="' + i + '" type="button">+ ' + esc(t[0]) + '</button>').join(" ");
+    renderDzLib();
+    $("dzTop").querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
+      DZ = { p:normPart(JSON.parse(JSON.stringify(PART_TEMPLATES[+b.dataset.tpl][1]))), bind:null, libId:null }; renderDesigner();
+    }));
+    const back = $("dzBack"); if(back) back.addEventListener("click", () => { SEL.work = bound.stage === "new" ? bound.id : SEL.work; if(bound.stage === "processing") SEL.processing = bound.id; showPage(bound.stage === "processing" ? "processing" : "work"); });
+    if(!p){ $("dzEditor").innerHTML = '<div class="card"><div class="empty">Изберете шаблон или детайл от библиотеката, за да започнете.</div></div>'; return; }
+
+    const dis = ro ? " disabled" : "";
+    const num = (f, label, extra) => '<label>' + label + '<input type="number" data-f="' + f + '" value="' + esc(p[f] || (f === "bd90" || f === "bd180" ? "" : p[f])) + '"' + (extra || "") + dis + '></label>';
+    let h = '<div class="card"><h2>Детайл</h2><div class="grid">' +
+      '<label>Име<input type="text" data-f="name" value="' + esc(p.name) + '"' + dis + '></label>' +
+      num("qty", "Брой", ' min="1" step="1"') + num("th", 'Дебелина на листа <span class="u">(мм)</span>', ' min="0.5" step="0.1"') +
+      num("L", 'Дъно — дължина <span class="u">(мм, външно)</span>', ' min="0" step="1"') + num("W", 'Дъно — ширина <span class="u">(мм, външно)</span>', ' min="0" step="1"') +
+      num("bd90", 'Корекция 90° <span class="u">(мм/огъване)</span>', ' min="0" step="0.1" placeholder="' + esc(S.bd90) + '"') +
+      num("bd180", 'Корекция 180° <span class="u">(мм/подгъвка)</span>', ' min="0" step="0.1" placeholder="' + esc(S.bd180) + '"') +
+      '</div><label style="margin-top:10px">Бележка<textarea rows="2" data-f="notes"' + dis + '>' + esc(p.notes) + '</textarea></label>' +
+      '<h3>Огъвания по страните <span class="u">— от дъното навън; размерите са външни, като на чертеж</span></h3><div class="edges">';
+    PART_EDGES.forEach(([e, name]) => {
+      const along = e === "front" || e === "back" ? "по дължината" : "по ширината";
+      h += '<div class="edge" data-e="' + e + '"><div class="edgeh"><b>' + name + '</b> <span class="muted">(' + along + ')</span></div>' +
+        (p.edges[e].length ? p.edges[e].map((s, i) => '<div class="segrow" data-i="' + i + '"><span class="segn">' + (i + 1) + '.</span>' +
+          '<input type="number" min="0" step="1" data-s="len" value="' + esc(s.len) + '"' + dis + '> мм ' +
+          '<select data-s="dir"' + dis + '>' + Object.keys(PART_DIRS).map(d => '<option value="' + d + '"' + (s.dir === d ? " selected" : "") + '>' + PART_DIRS[d] + '</option>').join("") + '</select>' +
+          (ro ? '' : '<button class="btn danger" data-segdel type="button">✕</button>') + '</div>').join("") : '<div class="muted">без огъване</div>') +
+        (ro ? '' : '<button class="btn small" data-segadd type="button">+ огъване</button>') + '</div>';
+    });
+    h += '</div><h3>Отвори в дъното <span class="u">— празна позиция = в средата; позицията е от лявата и от предната линия на огъване</span></h3>' +
+      p.holes.map((o, i) => '<div class="segrow hole" data-hi="' + i + '">' +
+        ['w','h','x','y'].map(k => '<label>' + ({ w:"ширина", h:"височина", x:"от ляво", y:"отпред" })[k] + '<input type="number" min="0" step="1" data-h="' + k + '" value="' + esc(o[k] == null ? "" : o[k]) + '"' + (k === "x" || k === "y" ? ' placeholder="среда"' : '') + dis + '></label>').join("") +
+        (ro ? '' : '<button class="btn danger" data-holedel type="button">✕</button>') + '</div>').join("") +
+      (ro ? '' : '<button class="btn small" id="dzHoleAdd" type="button">+ отвор</button>') + '</div>' +
+      '<div class="card"><h2>Заготовка и схема</h2><div id="dzPrev"></div></div>';
+    // actions
+    h += '<div class="card noprint"><div class="actions" style="justify-content:flex-start;margin-top:0">';
+    if(bound){
+      h += '<button class="btn" id="dzToLib" type="button">Запази копие в библиотеката</button>' +
+        '<button class="btn primary" id="dzDone" type="button">Готово — към поръчката</button>';
+    }else{
+      const targets = byStage("new");
+      h += '<button class="btn" id="dzSave" type="button">' + (DZ.libId ? 'Запази промените в библиотеката' : 'Запази в библиотеката') + '</button>' +
+        '<label class="dzTarget">Добави в<select id="dzTarget"><option value="">нова поръчка</option>' +
+          targets.map(o => '<option value="' + esc(o.id) + '">' + esc((o.name || "без име") + (o.serial ? " · " + orderSerial(o.serial) : "") + " (Разкрой)") + '</option>').join("") + '</select></label>' +
+        '<button class="btn primary" id="dzAdd" type="button">Добави в поръчка</button>';
+    }
+    h += '</div><div class="status" id="dzStatus"></div></div>';
+    $("dzEditor").innerHTML = h;
+    renderDzPreview();
+    const ed = $("dzEditor");
+    // fields
+    ed.querySelectorAll("[data-f]").forEach(inp => inp.addEventListener("input", () => {
+      const f = inp.dataset.f;
+      if(f === "name" || f === "notes") p[f] = inp.value;
+      else if(f === "qty") p.qty = Math.max(1, Math.round(+inp.value || 1));
+      else if(f === "th") p.th = +inp.value > 0 ? +inp.value : 1.5;
+      else p[f] = Math.max(0, +inp.value || 0);
+      dzChanged(false);
+    }));
+    ed.querySelectorAll(".edge").forEach(box => {
+      const e = box.dataset.e;
+      box.querySelectorAll(".segrow").forEach(row => {
+        const i = +row.dataset.i;
+        row.querySelectorAll("[data-s]").forEach(inp => inp.addEventListener("input", () => {
+          const s = p.edges[e][i]; if(!s) return;
+          if(inp.dataset.s === "len") s.len = Math.max(0, +inp.value || 0); else s.dir = inp.value;
+          dzChanged(false);
+        }));
+        const del = row.querySelector("[data-segdel]"); if(del) del.addEventListener("click", () => { p.edges[e].splice(i, 1); dzChanged(true); });
+      });
+      const add = box.querySelector("[data-segadd]");
+      if(add) add.addEventListener("click", () => {
+        const last = p.edges[e][p.edges[e].length - 1];
+        // a sensible next direction: after up/down go inward, after a horizontal segment go down
+        p.edges[e].push({ len:last ? 10 : 30, dir:!last ? "up" : (isVertDir(last.dir) ? "in" : "down") });
+        dzChanged(true);
+      });
+    });
+    ed.querySelectorAll(".hole").forEach(row => {
+      const i = +row.dataset.hi;
+      row.querySelectorAll("[data-h]").forEach(inp => inp.addEventListener("input", () => {
+        const k = inp.dataset.h, v = inp.value.trim();
+        p.holes[i][k] = (k === "x" || k === "y") && v === "" ? null : Math.max(0, +v || 0);
+        dzChanged(false);
+      }));
+      const del = row.querySelector("[data-holedel]"); if(del) del.addEventListener("click", () => { p.holes.splice(i, 1); dzChanged(true); });
+    });
+    const ha = $("dzHoleAdd"); if(ha) ha.addEventListener("click", () => { p.holes.push({ w:Math.round(p.L / 2), h:Math.round(p.W / 2), x:null, y:null }); dzChanged(true); });
+    const msg = (m, k) => { const el = $("dzStatus"); el.className = "status " + (k || ""); el.textContent = m; };
+    const saveToLib = asCopy => {
+      const copy = normPart(JSON.parse(JSON.stringify(p)));
+      if(!asCopy && DZ.libId && LIB.items.some(x => x.pid === DZ.libId)){ copy.pid = DZ.libId; LIB.items = LIB.items.map(x => x.pid === DZ.libId ? copy : x); }
+      else{ copy.pid = newPid(); LIB.items.push(copy); if(!asCopy) DZ.libId = copy.pid; }
+      saveLib(); renderDzLib(); msg("✓ Запазено в библиотеката: „" + copy.name + "“.", "ok");
+    };
+    if($("dzSave")) $("dzSave").addEventListener("click", () => { saveToLib(false); const b = $("dzSave"); if(b) b.textContent = "Запази промените в библиотеката"; });
+    if($("dzToLib")) $("dzToLib").addEventListener("click", () => saveToLib(true));
+    if($("dzDone")) $("dzDone").addEventListener("click", () => { $("dzBack") && $("dzBack").click(); });
+    if($("dzAdd")) $("dzAdd").addEventListener("click", () => {
+      const copy = normPart(JSON.parse(JSON.stringify(p))); copy.pid = newPid();
+      const tid = $("dzTarget").value;
+      let o = tid ? findOrder(tid) : null;
+      if(!o){ o = makeRecord(null, ""); o.tables = []; o.parts = []; o.name = ""; ORD.orders.push(o); }
+      o.parts = (o.parts || []).concat([copy]);
+      saveOrders();
+      SEL.work = o.id; TAB = "print"; showPage("work");
+      setStatus("✓ „" + copy.name + "“ е добавен в " + (tid ? "поръчката на " + (o.name || "без име") : "нова поръчка — попълнете клиента в „Маси — редакция“") + ".", "ok");
+    });
+  }
+  function renderDzPreview(){
+    const el = $("dzPrev"), p = dzPart(); if(!el || !p) return;
+    const g = partGeo(p), n = g.notches;
+    const cuts = [["отпред ляво", n.bl], ["отпред дясно", n.br], ["отзад ляво", n.tl], ["отзад дясно", n.tr]].filter(c => c[1]);
+    el.innerHTML = '<div class="totals">' +
+      tot("Заготовка", fmt(g.BW) + " × " + fmt(g.BH) + " мм", "лист " + p.th + " мм · " + p.qty + " бр.") +
+      tot("Огъвания", g.bends + " бр.", "корекция " + fmt(g.b90) + " мм/90°" + (g.b180 ? ", " + fmt(g.b180) + " мм/180°" : "")) +
+      tot("Тегло", g.kg.toFixed(1) + " кг/бр.", "по заготовката, без изрезите") +
+      tot("Цена за клиента", eur2(partPrice(p)), "площ + огъвания, с надценката" + (p.qty > 1 ? " · за " + p.qty + " бр." : "")) +
+      '</div>' +
+      g.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
+      (cuts.length ? '<div class="muted" style="margin-top:8px">Изрези в ъглите: ' + esc(cuts.map(c => c[0] + " " + fmt(c[1][0]) + "×" + fmt(c[1][1]) + " мм").join(", ")) + '</div>' : '') +
+      (PART_EDGES.some(([e]) => g.ch[e].segs.length) ? '<div class="tw"><table class="cut bends" style="margin-top:8px"><thead><tr><th>Страна</th><th>Профил</th><th>Линии на огъване от ръба на заготовката (мм)</th></tr></thead><tbody>' +
+        PART_EDGES.filter(([e]) => g.ch[e].segs.length).map(([e, name]) => '<tr><td>' + name + '</td><td>' + esc(profileTxt(g.ch[e])) + '</td><td class="size">' +
+          esc(g.ch[e].lines.slice().reverse().map(l => fmt(l.fromEdge) + (l.angle === 180 ? " (180°)" : "")).join(" → ")) + '</td></tr>').join("") + '</tbody></table></div>' : '') +
+      '<div class="schemes" style="margin-top:10px">' + partSvg(p, g) + '</div>';
+  }
+
   /* ---------- burger menu / pages ---------- */
-  const PAGES = { work:"Разкрой", processing:"В обработка", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
+  const PAGES = { work:"Разкрой", processing:"В обработка", designer:"Конструктор", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
   function closeMenu(){ $("menu").hidden = true; $("menubg").hidden = true; }
   function showPage(name){
     if(!PAGES[name]) name = "work";
@@ -1854,6 +2242,7 @@
     renderLists();
     openViewer();
     if(name === "archive") renderArchive();
+    if(name === "designer") renderDesigner();
     if(name === "stock") renderStock();
     window.scrollTo({ top:0 });
   }
