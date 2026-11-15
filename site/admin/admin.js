@@ -1257,10 +1257,53 @@
         '<button class="btn" type="button" data-copy="' + esc(all) + '">Копирай всичко</button>' +
         '<a class="btn primary" href="' + ECONT_URL + '" target="_blank" rel="noopener noreferrer">Отвори Еконт → нова пратка</a>' +
       '</div>' +
+      (CLOUD ? '<div class="econtCalc"><button class="btn" type="button" id="b-econtCalc">Изчисли цена (Еконт)</button> ' +
+        '<span class="muted">само пита Еконт за цена — не създава пратка</span><div id="econtOut"></div></div>' : '') +
       '<div class="grid" style="margin-top:10px"><label>Номер на товарителницата<input type="text" id="b-waybill" value="' + esc(o.waybill || "") + '" placeholder="след като я създадете в Еконт"></label>' +
         '<div style="align-self:end"><a class="btn" id="b-track" href="' + trackUrl(o.waybill) + '" target="_blank" rel="noopener noreferrer"' + (o.waybill ? '' : ' hidden') + '>Проследи пратката</a></div></div>' +
       '</div>';
   }
+  // the shipment as Econt's API wants it (for the price only)
+  function econtLabel(o){
+    const d = o.delivery || {}, pk = shipInfo(o);
+    const n = pk.reduce((a, p) => a + p.qty, 0), kg = pk.reduce((a, p) => a + p.kg * p.qty, 0);
+    const big = pk.reduce((m, p) => p.L * p.D * p.H > m.L * m.D * m.H ? p : m, pk[0] || { L:0, D:0, H:0 });
+    const where = (city, street) => ({ city:{ country:{ code3:"BGR" }, name:String(city || "").trim() }, street:String(street || "").trim() });
+    return {
+      senderClient:{ name:S.senderName || "", phones:[S.senderPhone || ""] },
+      senderAddress:where(S.senderCity, S.senderAddr),
+      receiverClient:{ name:o.name || "Клиент", phones:[o.phone || ""] },
+      receiverAddress:where(d.city || "", d.type === "office" ? "" : (d.address || "")),
+      packCount:n, shipmentType:"PACK", weight:kg,
+      shipmentDimensionsL:big.L, shipmentDimensionsW:big.D, shipmentDimensionsH:big.H,
+      shipmentDescription:"Маса от неръждаема стомана (инокс)",
+      paymentReceiverMethod:"cash",
+    };
+  }
+  async function econtCalc(o){
+    const out = $("econtOut"), btn = $("b-econtCalc");
+    const missing = [!S.senderCity && "населено място на изпращача (Настройки)", !(o.delivery && o.delivery.city) && "населено място на получателя"].filter(Boolean);
+    if(missing.length){ out.innerHTML = '<div class="warnbox">Липсва: ' + esc(missing.join(", ")) + '.</div>'; return; }
+    btn.disabled = true; btn.textContent = "Пита Еконт...";
+    const label = econtLabel(o);
+    try{
+      const res = await CLOUD.fn("econt", { action:"calculate", label });
+      const L = res && res.econt && res.econt.label;
+      if(res && res.ok && L && L.totalPrice != null){
+        out.innerHTML = '<div class="donebox">Цена от Еконт: <b>' + esc(L.totalPrice) + ' ' + esc(L.currency || "") + '</b>' +
+          (L.receiverDueAmount != null ? ' · плаща получателят: ' + esc(L.receiverDueAmount) + ' ' + esc(L.currency || "") : '') +
+          ((o.delivery && o.delivery.type === "office") ? '<br><span class="muted">Сметнато до адрес в ' + esc(o.delivery.city) + ' — до офис обикновено е по-евтино.</span>' : '') + '</div>';
+      }else{
+        const e = res && res.econt, msg = (e && (e.message || (e.innerErrors && e.innerErrors.map(x => x.message).join("; ")))) || (res && res.error) || ("HTTP " + (res && res.status));
+        out.innerHTML = '<div class="warnbox">Еконт не върна цена: ' + esc(msg) + '</div>';
+      }
+      out.innerHTML += '<details class="muted"><summary>Подробности (за проверка)</summary><pre class="econtRaw">' + esc(JSON.stringify({ sent:label, answer:res }, null, 1).slice(0, 6000)) + '</pre></details>';
+    }catch(e){
+      out.innerHTML = '<div class="warnbox">' + esc(e.offline ? "Няма връзка с облака." : (e.message || "Грешка")) + '</div>';
+    }finally{ btn.disabled = false; btn.textContent = "Изчисли цена (Еконт)"; }
+  }
+  $("bottomBar").addEventListener("click", e => { if(e.target.closest("#b-econtCalc") && order) econtCalc(order); });
+
   // copy buttons (anywhere in the bottom bar)
   async function copyText(txt){
     try{ await navigator.clipboard.writeText(txt); return true; }

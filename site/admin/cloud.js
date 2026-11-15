@@ -122,11 +122,23 @@
     await req("/storage/v1/object/docs", { method:"DELETE", headers:{ "Content-Type":"application/json" }, body:JSON.stringify({ prefixes:ids.map(docKey) }) });
   }
 
+  // a Supabase Edge Function (e.g. "econt"); answers JSON
+  async function fn(name, body){
+    var r;
+    try{ r = await req("/functions/v1/" + name, { method:"POST", headers:{ "Content-Type":"application/json" }, body:JSON.stringify(body || {}) }); }
+    catch(e){
+      if(e.status === 404) throw CloudError("Функцията „" + name + "“ още не е пусната в Supabase.", 404);
+      var m = /: (\{.*\})$/.exec(e.message || ""); if(m){ try{ var j = JSON.parse(m[1]); if(j.error) e.message = j.error; }catch(x){} }
+      throw e;
+    }
+    return readJson(r);
+  }
+
   window.Cloud = {
     configured:configured, url:BASE,
     login:login, logout:logout, restore:restore, refresh:refresh,
     email:function(){ return sess ? sess.email : ""; }, loggedIn:function(){ return !!sess; },
     list:list, fetchRows:fetchRows, upsert:upsert, remove:remove, rpc:rpc, counters:counters,
-    docUp:docUp, docDown:docDown, docRemove:docRemove
+    docUp:docUp, docDown:docDown, docRemove:docRemove, fn:fn
   };
 })();
