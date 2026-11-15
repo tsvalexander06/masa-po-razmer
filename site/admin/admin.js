@@ -1203,6 +1203,24 @@
       $("b-price").addEventListener("input", e => { const v = e.target.value.trim(); o.price = v === "" ? null : +v; saveSoon(); renderLists(); });
       $("b-place").addEventListener("input", e => { o.place = e.target.value; saveSoon(); renderLists(); });
       $("b-ddate").addEventListener("input", e => { o.deliveryDate = e.target.value; saveSoon(); renderLists(); });
+      // delivery fields in the Econt panel: saved while typing, the panel is redrawn when a field is left
+      const dl = document.querySelector(".dlvEdit");
+      if(dl) dl.addEventListener("focusout", e => { if(e.relatedTarget && dl.contains(e.relatedTarget)) return;
+        setTimeout(() => { const f = document.activeElement; if(f && f.closest && f.closest(".dlvEdit")) return; const y = window.scrollY; renderBar(); window.scrollTo(0, y); }, 0); });
+      [["b-dlvType","type"],["b-dlvCity","city"],["b-dlvAddr","address"]].forEach(([id, k]) => {
+        const el = $(id); if(!el) return;
+        el.addEventListener("input", e => {
+          o.delivery = normDelivery(Object.assign({ type:"address" }, o.delivery, { [k]:e.target.value }));
+          if(!o.place || o.place === o._autoPlace){ o.place = o._autoPlace = deliveryText(o.delivery); const pl = $("b-place"); if(pl) pl.value = o.place; }
+          saveSoon(); renderLists(); renderHead();
+        });
+        // redraw (labels, copy rows) only once the delivery fields are left — not while moving between them
+        el.addEventListener("change", () => setTimeout(() => {
+          const f = document.activeElement;
+          if(f && f.closest && f.closest(".dlvEdit")) return;
+          const y = window.scrollY; renderBar(); window.scrollTo(0, y);
+        }, 0));
+      });
       const wb = $("b-waybill");
       if(wb) wb.addEventListener("input", e => { o.waybill = e.target.value.replace(/\s+/g, ""); saveSoon(); renderLists();
         const tr = $("b-track"); if(tr){ tr.hidden = !o.waybill; tr.href = trackUrl(o.waybill); } });
@@ -1245,7 +1263,14 @@
     const cp = (v) => v ? '<button class="btn small" type="button" data-copy="' + esc(v) + '">Копирай</button>' : '<span class="muted">—</span>';
     return '<div class="econt"><h3>Доставка с Еконт</h3>' +
       (sender.some(x => !String(x || "").trim()) ? '<div class="warnbox">Попълнете данните на изпращача веднъж в Настройки → „Изпращач за Еконт“.</div>' : '') +
-      (!d ? '<div class="note">Поръчката е от стара форма без адрес за доставка — използва се „Място на доставка“.</div>' : '') +
+      // the recipient's delivery: editable here too (old orders have none; it does not change the cut)
+      '<div class="grid dlvEdit">' +
+        '<label>Доставка<select id="b-dlvType">' + ["address","office"].map(k => '<option value="' + k + '"' + ((d ? d.type : "address") === k ? " selected" : "") + '>' + DLV[k] + '</option>').join("") + '</select></label>' +
+        '<label>Населено място (получател)<input type="text" id="b-dlvCity" value="' + esc(d ? d.city : "") + '" placeholder="напр. Пловдив"></label>' +
+        '<label>' + (d && d.type === "office" ? "Офис на Еконт" : "Адрес на получателя") + '<input type="text" id="b-dlvAddr" value="' + esc(d ? d.address : "") + '" placeholder="' + (d && d.type === "office" ? "кой офис" : "улица, №") + '"></label>' +
+      '</div>' +
+      (!(d && d.city) ? '<div class="note">' + (d ? 'Попълнете населеното място на получателя.' : 'Поръчката е от стара форма без адрес за доставка — попълнете населеното място и адреса тук.') +
+        (o.place ? ' Записано място на доставка: „' + esc(o.place) + '“.' : '') + '</div>' : '') +
       '<div class="tw"><table class="cut econtTbl"><tbody>' +
         rows.map(r => '<tr><td>' + esc(r[0]) + '</td><td><b>' + esc(r[1] || "") + '</b></td><td>' + cp(r[1]) + '</td></tr>').join("") +
         pk.map(p => { const v = p.L + " × " + p.D + " × " + p.H + " см, ≈ " + p.kg + " кг";
