@@ -194,12 +194,25 @@
   function setStatus(msg, kind){ $("status").className = "status " + (kind || ""); $("status").textContent = msg; }
   function procMsg(msg, kind){ $("procStatus").className = "status " + (kind || ""); $("procStatus").textContent = msg; }
 
+  // доставка от клиентската форма: { type:"address"|"office"|"pickup", city, address }
+  const DLV = { address:"до адрес", office:"до офис на Еконт", pickup:"взимане от нас" };
+  function normDelivery(x){
+    const t = x && DLV[x.type] ? x.type : "address";
+    return { type:t, city:String((x && x.city) || "").trim(), address:String((x && x.address) || "").trim() };
+  }
+  function deliveryText(x){
+    if(!x) return "";
+    if(x.type === "pickup") return "взимане от нас";
+    const where = [x.city, x.address].filter(Boolean).join(", ");
+    return where ? DLV[x.type] + " — " + where : "";
+  }
   function makeRecord(data, source){
     const d = data || {};
+    const delivery = d.delivery ? normDelivery(d.delivery) : null;
     return { id:newId(), stage:"new", serial:null, addedAt:new Date().toISOString(),
       name:d.name || "", phone:d.phone || "", created:d.created || "", source:source || "", orderNo:d.orderNo || "",
       priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : [{ hemDir:"wall" }]).map(normTable),
-      hasDoc:false, docName:"", cut:null, clientPrice:null, cost:null, costMaterials:null, price:null, place:"", deliveryDate:"" };
+      hasDoc:false, docName:"", cut:null, clientPrice:null, cost:null, costMaterials:null, price:null, place:"", deliveryDate:"", delivery };
   }
   async function readOrderFile(file){
     if(/\.json$/i.test(file.name)){
@@ -291,7 +304,8 @@
     $("vTitle").innerHTML = '<div class="vt"><b>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Нова поръчка") + '</b> · ' + esc(o.name || "без име") +
       (o.phone ? ' · ' + esc(o.phone) : '') + ' <span class="stage st-' + o.stage + '">' + esc(STAGES[o.stage]) + '</span></div>' +
       '<div class="muted">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена") + (o.addedAt ? " · заредена " + esc(fmtDT(o.addedAt)) : "") +
-      (o.confirmedAt ? " · потвърдена " + esc(fmtDT(o.confirmedAt)) : "") + '</div>';
+      (o.confirmedAt ? " · потвърдена " + esc(fmtDT(o.confirmedAt)) : "") + '</div>' +
+      (deliveryText(o.delivery) ? '<div class="muted"><b>Доставка:</b> ' + esc(deliveryText(o.delivery)) + '</div>' : '');
     $("vDoc").hidden = !o.hasDoc;
   }
   // after any change to the open order: keep it, refresh the lists and the title
@@ -320,7 +334,11 @@
     let h = '<div class="card"><h2>Клиент</h2>' +
       (ro ? '<div class="note" style="margin:0 0 12px">Разкроят е потвърден, затова полетата са заключени. За промяна на размерите натиснете „Върни в Разкрой“ най-долу.</div>' : '') +
       '<div class="grid"><label>Име<input type="text" id="o-name" value="' + esc(o.name) + '"' + dis + '></label>' +
-      '<label>Телефон<input type="text" id="o-phone" value="' + esc(o.phone) + '"' + dis + '></label></div></div>';
+      '<label>Телефон<input type="text" id="o-phone" value="' + esc(o.phone) + '"' + dis + '></label>' +
+      '<label>Доставка<select id="o-dlvType"' + dis + '>' + Object.keys(DLV).map(k => '<option value="' + k + '"' + ((o.delivery ? o.delivery.type : "address") === k ? " selected" : "") + '>' + DLV[k] + '</option>').join("") + '</select></label>' +
+      '<label>Населено място<input type="text" id="o-dlvCity" value="' + esc(o.delivery ? o.delivery.city : "") + '"' + dis + '></label>' +
+      '<label>Адрес / офис на Еконт<input type="text" id="o-dlvAddr" value="' + esc(o.delivery ? o.delivery.address : "") + '"' + dis + '></label>' +
+      '</div></div>';
     o.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="' + i + '"><h2 class="tablehead"><span class="name">Маса ' + (i + 1) + '</span>' +
         (o.tables.length > 1 && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
@@ -348,6 +366,8 @@
 
     $("o-name").addEventListener("input", e => { o.name = e.target.value; recompute(); edited(); });
     $("o-phone").addEventListener("input", e => { o.phone = e.target.value; recompute(); edited(); });
+    [["o-dlvType","type"],["o-dlvCity","city"],["o-dlvAddr","address"]].forEach(([id, k]) => $(id).addEventListener("input", e => {
+      o.delivery = normDelivery(Object.assign({}, o.delivery, { [k]:e.target.value })); recompute(); edited(); }));
     $("addT").addEventListener("click", () => { o.tables.push(normTable({ hemDir:"wall" })); renderEdit(); recompute(); edited(); });
     document.querySelectorAll("#order .tbl").forEach(card => {
       const i = +card.dataset.i, t = o.tables[i];
@@ -931,7 +951,8 @@
     // head: who and what
     const cr = fmtDT(o.created);
     let h = '<div class="card"><h2>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Поръчка — чака потвърждение на разкроя") + '</h2>' +
-      '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b> · Маси: <b>' + nTables + '</b></div>' +
+      '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b> · Маси: <b>' + nTables + '</b>' +
+        (deliveryText(o.delivery) ? '<br>Доставка: <b>' + esc(deliveryText(o.delivery)) + '</b>' : '') + '</div>' +
       '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
 
     // materials for the whole order
@@ -1207,6 +1228,7 @@
     o.cut = { at:now, used:cur.used.map(x => Object.assign({}, x)), added };
     snapPrices(o);
     o.stage = "processing"; o.confirmedAt = now; delete o.noData;
+    if(!o.place && deliveryText(o.delivery)) o.place = deliveryText(o.delivery);
     saveInv(); saveOrders(); renderStock();
     SEL.work = null; TAB = "print";
     showPage("work");

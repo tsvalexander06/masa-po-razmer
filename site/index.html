@@ -95,6 +95,18 @@
     <input type="text" id="name" placeholder="Име и фамилия">
     <label>Телефон</label>
     <input type="text" id="phone" placeholder="08XX XXX XXX">
+    <label>Доставка</label>
+    <select id="dlvType">
+      <option value="address" selected>До адрес (с Еконт)</option>
+      <option value="office">До офис на Еконт</option>
+      <option value="pickup">Ще я взема от вас</option>
+    </select>
+    <div id="dlvBox">
+      <label>Населено място</label>
+      <input type="text" id="dlvCity" placeholder="напр. София" autocomplete="address-level2">
+      <label id="dlvAddrLbl">Адрес за доставка</label>
+      <input type="text" id="dlvAddr" placeholder="улица, №, вход, етаж" autocomplete="street-address">
+    </div>
   </div>
 
   <!-- summary + send -->

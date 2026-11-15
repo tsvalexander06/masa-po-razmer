@@ -398,6 +398,7 @@
     const nm=$("name").value.trim(), ph=$("phone").value.trim();
     if(nm) s+="Име:     "+nm+"\n";
     if(ph) s+="Телефон: "+ph+"\n";
+    s+="Доставка: "+deliveryText(readDelivery())+"\n";
     const o=buildOrder();
     $("spec").textContent=s;
     renderPrice(o);
@@ -419,6 +420,24 @@
 
   $("name").addEventListener("input", renderAll);
   $("phone").addEventListener("input", renderAll);
+  /* ---------- доставка ---------- */
+  const DLV = { address:"до адрес", office:"до офис на Еконт", pickup:"взимане от нас" };
+  function readDelivery(){
+    const type = DLV[$("dlvType").value] ? $("dlvType").value : "address";
+    return type === "pickup" ? { type } : { type, city:$("dlvCity").value.trim(), address:$("dlvAddr").value.trim() };
+  }
+  function deliveryText(d){
+    if(!d || d.type === "pickup") return "взимане от нас";
+    return DLV[d.type] + ((d.city || d.address) ? " — " + [d.city, d.address].filter(Boolean).join(", ") : " (не е попълнен)");
+  }
+  function renderDelivery(){
+    const t = $("dlvType").value;
+    $("dlvBox").style.display = t === "pickup" ? "none" : "block";
+    $("dlvAddrLbl").textContent = t === "office" ? "Офис на Еконт" : "Адрес за доставка";
+    $("dlvAddr").placeholder = t === "office" ? "кой офис — напр. Еконт Люлин 5" : "улица, №, вход, етаж";
+  }
+  ["dlvType","dlvCity","dlvAddr"].forEach(id => { $(id).addEventListener("input", () => { renderDelivery(); renderAll(); }); $(id).addEventListener("change", () => { renderDelivery(); renderAll(); }); });
+  renderDelivery();
   $("calc").addEventListener("click", ()=>{ priceShown=true; renderAll(); $("price").scrollIntoView({behavior:"smooth", block:"nearest"}); });
   $("addTable").addEventListener("click", ()=>{
     const t = createTable();
@@ -432,7 +451,7 @@
     if(!newArmed){ newArmed=true; $("newOrder").textContent="Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
     clearTimeout(newTimer); resetNewBtn();
     tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
-    seq=0; $("name").value=""; $("phone").value=""; ORDER_NO=genOrderNo();
+    seq=0; $("name").value=""; $("phone").value=""; $("dlvType").value="address"; $("dlvCity").value=""; $("dlvAddr").value=""; renderDelivery(); ORDER_NO=genOrderNo();
     priceShown=false; $("price").hidden=true; pdfCache=null; $("ok").textContent="";
     createTable();
     window.scrollTo({top:0, behavior:"smooth"});
@@ -467,7 +486,7 @@
     mctx.font="28px 'Courier New',monospace";
     const specLines=wrapLines(mctx, t.specText.split("\n").filter(l=>l.trim()!==""), W-140);
     const specH = 50 + specLines.length*38;
-    const H = Math.max(1754, 180 + dh + 60 + specH + 150);
+    const H = Math.max(1754, 180 + dh + 60 + specH + 230);   // + footer: client, delivery, price
     const C=document.createElement("canvas"); C.width=W; C.height=H;
     const x=C.getContext("2d");
     x.fillStyle="#ffffff"; x.fillRect(0,0,W,H);
@@ -491,6 +510,8 @@
     x.fillStyle="#15223a"; x.font="26px Arial,sans-serif";
     const nm=$("name").value.trim(), ph=$("phone").value.trim();
     x.fillText("Клиент: "+(nm||"—")+"     Телефон: "+(ph||"—"), 70, y);
+    y+=36; x.font="24px Arial,sans-serif";
+    wrapLines(x, ["Доставка: "+deliveryText(readDelivery())], W-140).forEach(l=>{ x.fillText(l, 70, y); y+=32; }); y-=32;
     if(meta&&meta.priceText){ y+=40; x.fillStyle="#1552c7"; x.font="bold 30px Arial,sans-serif"; x.fillText(meta.priceText, 70, y); }
     return C;
   }
@@ -603,7 +624,7 @@
   // The whole order as data. Reads the current field values (does NOT call renderAll).
   // Price is derived here, so it always matches the order.
   function buildOrder(){
-    const o={ v:1, orderNo:orderNumber(), name:$("name").value.trim(), phone:$("phone").value.trim(), tables:tablesSnapshot() };
+    const o={ v:1, orderNo:orderNumber(), name:$("name").value.trim(), phone:$("phone").value.trim(), delivery:readDelivery(), tables:tablesSnapshot() };
     o.price=priceFor(o);
     return o;
   }
@@ -654,7 +675,7 @@
      и да сравни с подписа — подменена цена просто се игнорира. */
   const ORDER_SECRET = "kv-mpr-sign-2026-v1";
   function canonicalOrder(d){
-    return JSON.stringify({ v:d.v, orderNo:d.orderNo, name:d.name, phone:d.phone, created:d.created, tables:d.tables, price:d.price });
+    return JSON.stringify({ v:d.v, orderNo:d.orderNo, name:d.name, phone:d.phone, delivery:d.delivery, created:d.created, tables:d.tables, price:d.price });
   }
   async function signOrder(d){
     try{
