@@ -1324,7 +1324,10 @@
       }
       out.innerHTML += '<details class="muted"><summary>Подробности (за проверка)</summary><pre class="econtRaw">' + esc(JSON.stringify({ sent:label, answer:res }, null, 1).slice(0, 6000)) + '</pre></details>';
     }catch(e){
-      out.innerHTML = '<div class="warnbox">' + esc(e.offline ? "Няма връзка с облака." : (e.message || "Грешка")) + '</div>';
+      // the browser cannot tell "no internet" from "the function is missing" (Supabase's 404 fails the browser's pre-check)
+      out.innerHTML = '<div class="warnbox">' + esc(e.offline
+        ? (navigator.onLine === false ? "Няма интернет." : "Функцията „econt“ в Supabase не отговаря — най-често още не е пусната или името ѝ не е точно econt (Supabase → Edge Functions).")
+        : (e.message || "Грешка")) + '</div>';
     }finally{ btn.disabled = false; btn.textContent = "Изчисли цена (Еконт)"; }
   }
   $("bottomBar").addEventListener("click", e => { if(e.target.closest("#b-econtCalc") && order) econtCalc(order); });
