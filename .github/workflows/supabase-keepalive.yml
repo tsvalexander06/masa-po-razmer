@@ -41,4 +41,11 @@ jobs:
           get "rest/v1/counters?select=name"
           printf '%-34s ' "rpc/is_admin (no login)"; curl -s -m 20 -w '  [HTTP %{http_code}]\n' -X POST "$U/rest/v1/rpc/is_admin" -H "apikey: $K" -H "Content-Type: application/json" -d '{}'
           printf '%-34s ' "rpc/take_serial (no login)"; curl -s -m 20 -w '  [HTTP %{http_code}]\n' -X POST "$U/rest/v1/rpc/take_serial" -H "apikey: $K" -H "Content-Type: application/json" -d '{"p_name":"probe","p_count":0,"p_min":1}' | head -c 300
+          echo "Econt function (no login → must refuse, never reaches Econt):"
+          F="$U/functions/v1/econt"
+          echo "-- OPTIONS (browser pre-check from the admin page):"
+          curl -s -m 20 -o /dev/null -D - -X OPTIONS "$F" -H "Origin: https://tsvalexander06.github.io" -H "Access-Control-Request-Method: POST" -H "Access-Control-Request-Headers: authorization,apikey,content-type" | grep -iE '^HTTP|^access-control' || true
+          echo "-- POST without login:"
+          curl -s -m 20 -D - -X POST "$F" -H "Origin: https://tsvalexander06.github.io" -H "apikey: $K" -H "Content-Type: application/json" -d '{"action":"calculate"}' | grep -iE '^HTTP|^access-control|error|message|code' | head -8 || true
+          echo
           printf '%-34s ' "auth settings"; curl -s -m 20 "$U/auth/v1/settings" -H "apikey: $K" | python3 -c "import sys,json; d=json.load(sys.stdin); print('disable_signup =', d.get('disable_signup'), '| email login =', d.get('external',{}).get('email'))"
