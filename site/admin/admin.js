@@ -1402,7 +1402,8 @@
     return {
       senderClient:{ name:S.senderName || "", phones:[S.senderPhone || ""] },
       senderAddress:where(S.senderCity, S.senderAddr),
-      receiverClient:{ name:o.name || "Клиент", phones:[o.phone || ""] },
+      // the price does not depend on the phone; Econt wants one, so the sender's is used if the customer gave none
+      receiverClient:{ name:o.name || "Клиент", phones:[o.phone || S.senderPhone || ""] },
       receiverAddress:where(d.city || "", d.type === "office" ? "" : (d.address || "")),
       packCount:n, shipmentType:"PACK", weight:kg,
       shipmentDimensionsL:big.L, shipmentDimensionsW:big.D, shipmentDimensionsH:big.H,
@@ -1453,14 +1454,18 @@
         out.innerHTML = (demo ? '<div class="muted">Ориентировъчно — по тарифата на Еконт от тестовия им профил (без вашите отстъпки). Точната цена се вижда при създаване на пратката.</div>' : '') +
           ((o.delivery && o.delivery.type === "office") ? '<div class="muted">Сметнато до адрес в ' + esc(o.delivery.city) + ' — до офис обикновено е по-евтино.</div>' : '');
       }else{
-        const e = res && res.econt, msg = (e && (e.message || (e.innerErrors && e.innerErrors.map(x => x.message).join("; ")))) || (res && res.error) || ("HTTP " + (res && res.status));
+        // Econt nests its errors (message + innerErrors[] + fields): collect every non-empty text
+        const texts = [], walk = x => { if(!x || typeof x !== "object") return; if(typeof x.message === "string" && x.message.trim()) texts.push(x.message.trim());
+          (x.innerErrors || []).forEach(walk); (x.fields || []).forEach(f => { if(typeof f === "string" && f.trim()) texts.push("поле: " + f); }); };
+        const e = res && res.econt; walk(e);
+        const msg = [...new Set(texts)].join("; ") || (res && res.error) || (e && e.raw ? String(e.raw).slice(0, 200) : "") || ("HTTP " + (res && res.status));
         const lg = res && res.login, badLogin = /потребителско|парола|password|user/i.test(msg);
         out.innerHTML = '<div class="warnbox">' + (demo ? 'Тестовият профил на Еконт' : 'Еконт') + ' не върна цена: ' + esc(msg) + '</div>' +
           (lg ? '<div class="muted" style="margin-top:6px">Пробвано с потребител <b>' + esc(lg.user) + '</b> (' + lg.userLength + ' знака) и парола от <b>' + lg.passLength + '</b> знака · ' + esc(lg.server) + '</div>' : '') +
           (badLogin && !demo ? '<div class="note" style="margin-top:6px">Проверете в Supabase → Edge Functions → Secrets: ECONT_USER е потребителското име за e-Econt (вижте го в профила си в e-Econt — може да не е имейлът), ECONT_PASS е паролата (ако влизате с Google, задайте си парола в e-Econt). ' +
             '<button class="btn small" type="button" id="b-econtDemo">Пробвай с тестовия профил на Еконт</button> — ако там излезе цена, заявката е наред и остава само входът.</div>' : '');
       }
-      out.innerHTML += '<details class="muted"><summary>Подробности (за проверка)</summary><pre class="econtRaw">' + esc(JSON.stringify({ sent:label, answer:res }, null, 1).slice(0, 6000)) + '</pre></details>';
+      out.innerHTML += '<details class="muted"' + (o.shipQuote && o.shipQuote.key === key ? '' : ' open') + '><summary>Подробности (за проверка)</summary><pre class="econtRaw">' + esc(JSON.stringify({ sent:label, answer:res }, null, 1).slice(0, 6000)) + '</pre></details>';
     }catch(e){
       // the browser cannot tell "no internet" from "the function is missing" (Supabase's 404 fails the browser's pre-check)
       out.innerHTML = '<div class="warnbox">' + esc(e.offline
