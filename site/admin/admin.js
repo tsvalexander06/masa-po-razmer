@@ -380,6 +380,7 @@
       const g = partGeo(p);
       h += '<div class="card partcard" data-j="' + j + '"><h2 class="tablehead"><span class="name">' + esc("Д" + (j + 1) + " · " + p.name) + '</span>' +
         '<button class="btn small" data-pact="edit" type="button">' + (ro ? 'Виж в конструктора' : 'Редактирай в конструктора') + '</button>' +
+        '<button class="btn small" data-pact="lib" type="button">Запази в библиотеката</button>' +
         (ro ? '' : '<button class="btn danger" data-pact="del" type="button">✕ Премахни</button>') + '</h2>' +
         '<div class="muted">дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм · лист ' + p.th + ' мм · ' + p.qty + ' бр. · заготовка ' + fmt(g.BW) + ' × ' + fmt(g.BH) + ' мм · огъвания ' + g.bends + '</div>' +
         '<div class="schemes" style="margin-top:8px">' + partSvg(p, g) + '</div></div>';
@@ -391,6 +392,11 @@
     document.querySelectorAll("#order .partcard").forEach(card => {
       const j = +card.dataset.j, p = o.parts[j];
       card.querySelector('[data-pact="edit"]').addEventListener("click", () => openDesigner({ orderId:o.id, pid:p.pid }));
+      const lb = card.querySelector('[data-pact="lib"]');
+      lb.addEventListener("click", () => {
+        const copy = normPart(JSON.parse(JSON.stringify(p))); copy.pid = newPid(); LIB.items.push(copy); saveLib();
+        lb.textContent = "✓ В библиотеката"; lb.disabled = true;
+      });
       const del = card.querySelector('[data-pact="del"]');
       if(del) del.addEventListener("click", () => {
         if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
@@ -1490,6 +1496,27 @@
     procMsg("✓ " + serTxt(o) + (o.name ? " (" + o.name + ")" : "") + " е архивирана.", "ok");
   }
 
+  /* ---------- обединяване на чакащи поръчки: масите и детайлите отиват в най-старата, разкроят става общ ---------- */
+  var WSEL = new Set();
+  function mergeOrders(ids){
+    const list = byStage("new").filter(o => ids.includes(o.id)).sort((a, b) => (a.addedAt || "").localeCompare(b.addedAt || ""));
+    if(list.length < 2) return;
+    if(list.filter(o => o.hasDoc).length > 1){ setStatus("⚠ Повече от една от избраните поръчки има PDF на клиент — те не се обединяват (всяка поръчка пази един документ).", "warn"); return; }
+    const target = list.find(o => o.hasDoc) || list[0], rest = list.filter(o => o !== target);
+    rest.forEach(o => {
+      target.tables = (target.tables || []).concat(o.tables || []);
+      target.parts = (target.parts || []).concat((o.parts || []).map(p => Object.assign({}, p, { pid:newPid() })));
+      if(!target.name && o.name) target.name = o.name;
+      if(!target.phone && o.phone) target.phone = o.phone;
+      if(!target.delivery && o.delivery) target.delivery = o.delivery;
+      if(o.serial && !target.serial) target.serial = o.serial;
+    });
+    ORD.orders = ORD.orders.filter(o => !rest.includes(o));
+    WSEL = new Set(); saveOrders();
+    SEL.work = target.id; TAB = "print"; showPage("work");
+    setStatus("✓ Обединени " + list.length + " поръчки в една — общ разкрой. Проверете името на клиента в „Маси — редакция“.", "ok");
+  }
+
   /* ---------- lists: Разкрой (waiting) and В обработка (being made) ---------- */
   function renderLists(){
     const w = byStage("new").sort((a, b) => (a.addedAt || "").localeCompare(b.addedAt || ""));
@@ -1499,14 +1526,19 @@
     $("workCount").textContent = w.length ? "(" + w.length + ")" : "";
     $("procCount").textContent = p.length ? "(" + p.length + ")" : "";
     const openBtn = (id, sel) => '<button class="btn small" data-open="' + esc(id) + '" type="button">' + (sel ? "Затвори" : "Отвори") + '</button>';
+    [...WSEL].forEach(id => { if(!w.some(o => o.id === id)) WSEL.delete(id); });
     $("workList").innerHTML = w.length
-      ? '<div class="tw"><table class="cut list"><thead><tr><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Заредена</th><th>Файл</th><th></th></tr></thead><tbody>' +
+      ? '<div class="tw"><table class="cut list"><thead><tr><th style="width:1%"></th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Заредена</th><th>Файл</th><th></th></tr></thead><tbody>' +
         w.map(o => '<tr class="' + (SEL.work === o.id ? "sel" : "") + '" data-row="' + esc(o.id) + '">' +
+          '<td><input type="checkbox" data-wsel="' + esc(o.id) + '"' + (WSEL.has(o.id) ? " checked" : "") + ' title="за обединяване"></td>' +
           '<td><b>' + esc(o.name || "без име") + '</b>' + (o.serial ? ' <span class="muted">' + esc(orderSerial(o.serial)) + '</span>' : '') + '</td>' +
           '<td>' + esc(o.phone || "—") + '</td><td class="q">' + itemsTxt(o) + '</td>' +
           '<td class="size">' + esc(eur2(clientPriceOf(o))) + '</td><td>' + esc(fmtDT(o.addedAt)) + '</td>' +
           '<td class="muted">' + esc(o.source || "ръчно") + '</td><td>' + openBtn(o.id, SEL.work === o.id) + '</td></tr>').join("") +
-        '</tbody></table></div>'
+        '</tbody></table></div>' +
+        (w.length > 1 ? '<div class="row mergeBar"><span class="muted">' + (WSEL.size > 1 ? 'Избрани: <b>' + WSEL.size + '</b>' :
+          'Отметнете две или повече поръчки, за да ги обедините в една — разкроят им става общ (по-малко листове).') + '</span>' +
+          (WSEL.size > 1 ? '<button class="btn primary" id="mergeBtn" type="button">Обедини избраните в една поръчка</button>' : '') + '</div>' : '')
       : '<div class="empty">Няма чакащи поръчки. Заредете PDF отгоре — може няколко наведнъж.</div>';
     $("procList").innerHTML = p.length
       ? '<div class="tw"><table class="cut list"><thead><tr><th>№</th><th>Клиент</th><th>Телефон</th><th>Маси</th><th>Цена за клиента</th><th>Продажна</th><th>Доставка</th><th>Потвърдена</th><th></th></tr></thead><tbody>' +
@@ -1518,6 +1550,8 @@
           '<td>' + esc(fmtDate(o.confirmedAt)) + '</td><td>' + openBtn(o.id, SEL.processing === o.id) + '</td></tr>').join("") +
         '</tbody></table></div>'
       : '<div class="empty">Няма поръчки в обработка. Поръчка идва тук, когато потвърдите разкроя ѝ в „Разкрой“.</div>';
+    $("workList").querySelectorAll("[data-wsel]").forEach(c => c.addEventListener("change", () => { if(c.checked) WSEL.add(c.dataset.wsel); else WSEL.delete(c.dataset.wsel); renderLists(); }));
+    const mb = $("mergeBtn"); if(mb) mb.addEventListener("click", () => mergeOrders([...WSEL]));
     [["workList", "work"], ["procList", "processing"]].forEach(([el, page]) => {
       $(el).querySelectorAll("[data-row]").forEach(tr => tr.addEventListener("click", e => {
         if(e.target.closest("input,a")) return;
@@ -2091,7 +2125,7 @@
           (nSel ? '<label class="dzTarget">в<select id="dzBulkTarget"><option value="">нова поръчка</option>' +
             targets.map(o => '<option value="' + esc(o.id) + '">' + esc((o.name || "без име") + (o.serial ? " · " + orderSerial(o.serial) : "") + " (Разкрой)") + '</option>').join("") + '</select></label>' +
             '<button class="btn primary" id="dzBulkAdd" type="button">Добави избраните в поръчка</button>' : '') + '</div>'
-      : '<div class="muted">Библиотеката е празна — запазените детайли ще се появят тук (и на всички устройства).</div>';
+      : '<div class="muted"><b>Библиотеката е празна.</b> Детайл влиза тук с „Запази в библиотеката“ — най-долу в редактора или от картата на детайла в поръчка (Разкрой → Маси — редакция). Вижда се от всички устройства.</div>';
     el.querySelectorAll("[data-libsel]").forEach(c => c.addEventListener("change", () => { if(c.checked) DZSEL.add(c.dataset.libsel); else DZSEL.delete(c.dataset.libsel); renderDzLib(); }));
     const all = $("dzSelAll"); if(all) all.addEventListener("change", () => { DZSEL = new Set(all.checked ? LIB.items.map(p => p.pid) : []); renderDzLib(); });
     const bulk = $("dzBulkAdd");
