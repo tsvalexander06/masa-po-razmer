@@ -169,6 +169,16 @@
   .segn{font-weight:700;color:var(--muted);width:18px}
   .dzTarget{display:flex;gap:6px;align-items:center;font-weight:600} .dzTarget select{width:auto;margin-top:0}
   table.dzlib{min-width:560px}
+  .dz3dWrap{position:relative;background:linear-gradient(180deg,#f8fafc,#e8eef5);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+  .dz3dWrap svg{display:block;width:100%;height:auto;touch-action:none;cursor:grab;user-select:none}
+  .dz3dWrap svg:active{cursor:grabbing}
+  .dzplus,.dzseg{cursor:pointer} .dzplus:hover circle{fill:#1552c7}
+  .dzPop{position:absolute;z-index:5;width:240px;background:#fff;border:1px solid #cfdcf0;border-radius:12px;box-shadow:0 8px 24px rgba(15,34,68,.18);padding:10px;display:flex;flex-direction:column;gap:8px}
+  .dzPopH{font-weight:800;color:var(--brand-dark);display:flex;justify-content:space-between;align-items:center}
+  .dzPopX{border:none;background:none;font-size:15px;cursor:pointer;color:var(--muted)}
+  .dzPopDirs{display:grid;grid-template-columns:1fr 1fr;gap:6px} .dzPopDirs .btn{justify-content:center}
+  .dzViews{align-items:center;justify-content:space-between} .dzViewBtns{display:flex;gap:6px;flex-wrap:wrap}
+  .dzBulk{align-items:center}
   .econtCalc{margin-top:10px} .econtCalc .donebox,.econtCalc .warnbox{margin-top:8px} pre.econtRaw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:260px;overflow:auto;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px}
   .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:14px}
   /* workshop print: only the print view of the open order */

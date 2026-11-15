@@ -2076,15 +2076,35 @@
     if(structural) renderDesigner(); else renderDzPreview();
   }
 
+  var DZSEL = new Set();   // parts ticked in the library
   function renderDzLib(){
     const el = $("dzLib"); if(!el) return;
+    [...DZSEL].forEach(id => { if(!LIB.items.some(p => p.pid === id)) DZSEL.delete(id); });
+    const nSel = DZSEL.size, targets = byStage("new");
     el.innerHTML = LIB.items.length
-      ? '<div class="tw"><table class="cut list dzlib"><thead><tr><th>Библиотека</th><th>Дъно (мм)</th><th>Заготовка (мм)</th><th>Лист</th><th></th></tr></thead><tbody>' +
+      ? '<div class="tw"><table class="cut list dzlib"><thead><tr><th style="width:1%"><input type="checkbox" id="dzSelAll"' + (nSel && nSel === LIB.items.length ? " checked" : "") + ' title="Избери всички"></th><th>Библиотека</th><th>Дъно (мм)</th><th>Заготовка (мм)</th><th>Лист</th><th></th></tr></thead><tbody>' +
         LIB.items.map(p => { const g = partGeo(p);
-          return '<tr class="' + (DZ.libId === p.pid && !DZ.bind ? "sel" : "") + '"><td><b>' + esc(p.name) + '</b></td><td class="size">' + fmt(p.L) + ' × ' + fmt(p.W) + '</td><td class="size">' + fmt(g.BW) + ' × ' + fmt(g.BH) +
+          return '<tr class="' + (DZ.libId === p.pid && !DZ.bind ? "sel" : "") + '"><td><input type="checkbox" data-libsel="' + esc(p.pid) + '"' + (DZSEL.has(p.pid) ? " checked" : "") + '></td><td><b>' + esc(p.name) + '</b>' + (p.qty > 1 ? ' <span class="muted">× ' + p.qty + '</span>' : '') + '</td><td class="size">' + fmt(p.L) + ' × ' + fmt(p.W) + '</td><td class="size">' + fmt(g.BW) + ' × ' + fmt(g.BH) +
             '</td><td>' + p.th + ' мм</td><td class="acts"><button class="btn small" data-libopen="' + esc(p.pid) + '" type="button">Отвори</button> <button class="btn danger" data-libdel="' + esc(p.pid) + '" type="button">Изтрий</button></td></tr>'; }).join("") +
-        '</tbody></table></div>'
+        '</tbody></table></div>' +
+        '<div class="row dzBulk"><span class="muted">' + (nSel ? 'Избрани: <b>' + nSel + '</b>' : 'Отметнете няколко детайла, за да ги разкроите заедно в една поръчка (най-евтино подреждане на листовете).') + '</span>' +
+          (nSel ? '<label class="dzTarget">в<select id="dzBulkTarget"><option value="">нова поръчка</option>' +
+            targets.map(o => '<option value="' + esc(o.id) + '">' + esc((o.name || "без име") + (o.serial ? " · " + orderSerial(o.serial) : "") + " (Разкрой)") + '</option>').join("") + '</select></label>' +
+            '<button class="btn primary" id="dzBulkAdd" type="button">Добави избраните в поръчка</button>' : '') + '</div>'
       : '<div class="muted">Библиотеката е празна — запазените детайли ще се появят тук (и на всички устройства).</div>';
+    el.querySelectorAll("[data-libsel]").forEach(c => c.addEventListener("change", () => { if(c.checked) DZSEL.add(c.dataset.libsel); else DZSEL.delete(c.dataset.libsel); renderDzLib(); }));
+    const all = $("dzSelAll"); if(all) all.addEventListener("change", () => { DZSEL = new Set(all.checked ? LIB.items.map(p => p.pid) : []); renderDzLib(); });
+    const bulk = $("dzBulkAdd");
+    if(bulk) bulk.addEventListener("click", () => {
+      const pick = LIB.items.filter(p => DZSEL.has(p.pid)).map(p => { const c = normPart(JSON.parse(JSON.stringify(p))); c.pid = newPid(); return c; });
+      const tid = $("dzBulkTarget").value;
+      let o = tid ? findOrder(tid) : null;
+      if(!o){ o = makeRecord(null, ""); o.tables = []; o.parts = []; ORD.orders.push(o); }
+      o.parts = (o.parts || []).concat(pick);
+      saveOrders(); DZSEL = new Set();
+      SEL.work = o.id; TAB = "print"; showPage("work");
+      setStatus("✓ " + pick.length + (pick.length === 1 ? " детайл е добавен" : " детайла са добавени") + " в " + (tid ? "поръчката на " + (o.name || "без име") : "нова поръчка") + " — разкроени заедно. Попълнете клиента в „Маси — редакция“.", "ok");
+    });
     el.querySelectorAll("[data-libopen]").forEach(b => b.addEventListener("click", () => {
       const it = LIB.items.find(p => p.pid === b.dataset.libopen); if(!it) return;
       DZ = { p:normPart(JSON.parse(JSON.stringify(it))), bind:null, libId:it.pid }; renderDesigner();
@@ -2111,9 +2131,14 @@
     const back = $("dzBack"); if(back) back.addEventListener("click", () => { SEL.work = bound.stage === "new" ? bound.id : SEL.work; if(bound.stage === "processing") SEL.processing = bound.id; showPage(bound.stage === "processing" ? "processing" : "work"); });
     if(!p){ $("dzEditor").innerHTML = '<div class="card"><div class="empty">Изберете шаблон или детайл от библиотеката, за да започнете.</div></div>'; return; }
 
+    DZ.pop = null; DZ.pick = null;
     const dis = ro ? " disabled" : "";
     const num = (f, label, extra) => '<label>' + label + '<input type="number" data-f="' + f + '" value="' + esc(p[f] || (f === "bd90" || f === "bd180" ? "" : p[f])) + '"' + (extra || "") + dis + '></label>';
-    let h = '<div class="card"><h2>Детайл</h2><div class="grid">' +
+    let h = '<div class="card"><h2>3D модел</h2>' +
+      '<div class="dz3dWrap" id="dz3dWrap"><svg id="dz3d" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg><div class="dzPop" id="dzPop" hidden></div></div>' +
+      '<div class="row dzViews"><span class="muted">' + (ro ? 'Влачете, за да завъртите.' : 'Влачете, за да завъртите · <b>⊕</b> в края на страна добавя перо · клик върху перо = промяна или изтриване') + '</span>' +
+      '<span class="dzViewBtns">' + [["iso","3D"],["front","отпред"],["side","отстрани"],["top","отгоре"],["under","отдолу"]].map(v => '<button class="btn small" type="button" data-view="' + v[0] + '">' + v[1] + '</button>').join("") + '</span></div></div>' +
+      '<div class="card"><h2>Детайл</h2><div class="grid">' +
       '<label>Име<input type="text" data-f="name" value="' + esc(p.name) + '"' + dis + '></label>' +
       num("qty", "Брой", ' min="1" step="1"') + num("th", 'Дебелина на листа <span class="u">(мм)</span>', ' min="0.5" step="0.1"') +
       num("L", 'Дъно — дължина <span class="u">(мм, външно)</span>', ' min="0" step="1"') + num("W", 'Дъно — ширина <span class="u">(мм, външно)</span>', ' min="0" step="1"') +
@@ -2150,6 +2175,7 @@
     }
     h += '</div><div class="status" id="dzStatus"></div></div>';
     $("dzEditor").innerHTML = h;
+    bindDz3D();
     renderDzPreview();
     const ed = $("dzEditor");
     // fields
@@ -2212,6 +2238,7 @@
     });
   }
   function renderDzPreview(){
+    renderDz3D();
     const el = $("dzPrev"), p = dzPart(); if(!el || !p) return;
     const g = partGeo(p), n = g.notches;
     const cuts = [["отпред ляво", n.bl], ["отпред дясно", n.br], ["отзад ляво", n.tl], ["отзад дясно", n.tr]].filter(c => c[1]);
@@ -2227,6 +2254,154 @@
         PART_EDGES.filter(([e]) => g.ch[e].segs.length).map(([e, name]) => '<tr><td>' + name + '</td><td>' + esc(profileTxt(g.ch[e])) + '</td><td class="size">' +
           esc(g.ch[e].lines.slice().reverse().map(l => fmt(l.fromEdge) + (l.angle === 180 ? " (180°)" : "")).join(" → ")) + '</td></tr>').join("") + '</tbody></table></div>' : '') +
       '<div class="schemes" style="margin-top:10px">' + partSvg(p, g) + '</div>';
+  }
+
+  /* ---------- Конструктор: 3D модел (въртене с влачене, ⊕ за ново перо, клик върху перо = промяна) ----------
+     Детайлът се сгъва в 3D от същите данни: дъно в равнината z=0 (x по дължината, y по ширината, отпред y=0),
+     всяко перо е правоъгълник по ръба на предишния. Рисува се като SVG (без библиотеки) — по-далечните стени първи. */
+  const EDGE_FRAMES = {
+    front:{ a:p => [0, 0, 0], b:p => [p.L, 0, 0], out:[0, -1, 0] },
+    back: { a:p => [0, p.W, 0], b:p => [p.L, p.W, 0], out:[0, 1, 0] },
+    left: { a:p => [0, 0, 0], b:p => [0, p.W, 0], out:[-1, 0, 0] },
+    right:{ a:p => [p.L, 0, 0], b:p => [p.L, p.W, 0], out:[1, 0, 0] },
+  };
+  const v3 = { add:(a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]], mul:(a, k) => [a[0] * k, a[1] * k, a[2] * k],
+    sub:(a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]], cross:(a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]] };
+  function partFaces(p, g){
+    const faces = [], ends = {};
+    faces.push({ kind:"base", pts:[[0, 0, 0], [p.L, 0, 0], [p.L, p.W, 0], [0, p.W, 0]],
+      holes:g.holes.map(h => { const x0 = h.x + (p.L - g.Lf) / 2, y0 = h.y + (p.W - g.Wf) / 2;
+        return [[x0, y0, 0], [x0 + h.w, y0, 0], [x0 + h.w, y0 + h.h, 0], [x0, y0 + h.h, 0]]; }) });
+    PART_EDGES.forEach(([e]) => {
+      const F = EDGE_FRAMES[e], out = F.out;
+      const dirv = { out, in:v3.mul(out, -1), up:[0, 0, 1], down:[0, 0, -1] };
+      let A = F.a(p), B = F.b(p), prev = "out";
+      (p.edges[e] || []).forEach((s, i) => {
+        if(!(+s.len > 0)) return;
+        if(bendAngle(prev, s.dir) === 180){   // a hem lies against the previous wall: show it a little apart
+          const off = isVertDir(s.dir) ? v3.mul(out, -3 * p.th) : [0, 0, 3 * p.th];
+          A = v3.add(A, off); B = v3.add(B, off);
+        }
+        const d = v3.mul(dirv[s.dir], +s.len), A2 = v3.add(A, d), B2 = v3.add(B, d);
+        faces.push({ kind:"seg", edge:e, i, pts:[A, B, B2, A2] });
+        A = A2; B = B2; prev = s.dir;
+      });
+      const lastDir = (p.edges[e] || []).filter(s => +s.len > 0).slice(-1)[0];
+      ends[e] = { mid:v3.mul(v3.add(A, B), 0.5), push:lastDir ? dirv[lastDir.dir] : out };
+    });
+    return { faces, ends };
+  }
+  function renderDz3D(){
+    const wrap = $("dz3dWrap"), p = dzPart(); if(!wrap || !p) return;
+    const g = partGeo(p), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    const V = DZ.view || (DZ.view = { yaw:-0.55, pitch:0.62 });
+    const { faces, ends } = partFaces(p, g);
+    const cx = p.L / 2, cy = p.W / 2, cyw = Math.cos(V.yaw), syw = Math.sin(V.yaw), cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
+    const pr = q => { const x = q[0] - cx, y = q[1] - cy, z = q[2];
+      const x1 = x * cyw - y * syw, y1 = x * syw + y * cyw;
+      return [x1, -(z * cp + y1 * sp), y1 * cp - z * sp]; };
+    const proj = faces.map(f => ({ f, P:f.pts.map(pr), H:(f.holes || []).map(h => h.map(pr)) }));
+    const all = proj.flatMap(q => q.P);
+    PART_EDGES.forEach(([e]) => all.push(pr(ends[e].mid)));
+    if(!all.length) return;
+    const minX = Math.min(...all.map(q => q[0])), maxX = Math.max(...all.map(q => q[0])), minY = Math.min(...all.map(q => q[1])), maxY = Math.max(...all.map(q => q[1]));
+    const VW = 640, VH = 400, pad = 46, k = Math.min((VW - 2 * pad) / Math.max(1, maxX - minX), (VH - 2 * pad) / Math.max(1, maxY - minY));
+    const ox = (VW - (maxX - minX) * k) / 2, oy = (VH - (maxY - minY) * k) / 2;
+    const sx = q => (ox + (q[0] - minX) * k).toFixed(1), sy = q => (oy + (q[1] - minY) * k).toFixed(1);
+    // light from the upper front-left; both sides of a sheet are drawn
+    const L = [-0.35, -0.5, 0.8], ln = Math.hypot(...L);
+    const shade = (pts, sel) => {
+      const n = v3.cross(v3.sub(pts[1], pts[0]), v3.sub(pts[3], pts[0])), nl = Math.hypot(...n) || 1;
+      const lit = Math.abs((n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / nl / ln);
+      const l = Math.round(64 + lit * 26);
+      return sel ? "hsl(214,85%," + Math.min(80, l - 6) + "%)" : "hsl(210,22%," + l + "%)";
+    };
+    proj.forEach(q => { q.depth = q.P.reduce((a, r) => a + r[2], 0) / q.P.length + (q.f.kind === "base" ? 0.01 : 0); });
+    proj.sort((a, b) => b.depth - a.depth);
+    const selKey = DZ.pick ? DZ.pick.edge + ":" + DZ.pick.i : "";
+    let svg = '<rect x="0" y="0" width="' + VW + '" height="' + VH + '" fill="transparent" data-bg="1"/>';
+    proj.forEach(q => {
+      const d = 'M' + q.P.map(r => sx(r) + ',' + sy(r)).join(' L') + ' Z' + q.H.map(h => ' M' + h.map(r => sx(r) + ',' + sy(r)).join(' L') + ' Z').join('');
+      const sel = q.f.kind === "seg" && selKey === q.f.edge + ":" + q.f.i;
+      svg += '<path d="' + d + '" fill-rule="evenodd" fill="' + shade(q.f.pts, sel) + '" stroke="' + (sel ? "#1552c7" : "#4a6785") + '" stroke-width="' + (sel ? 2.2 : 1) + '" stroke-linejoin="round"' +
+        (q.f.kind === "seg" ? ' class="dzseg" data-edge="' + q.f.edge + '" data-i="' + q.f.i + '"' : '') + '/>';
+    });
+    // side names and the ⊕ handles at the free end of every side
+    PART_EDGES.forEach(([e, name]) => {
+      const E = ends[e], tip = pr(v3.add(E.mid, v3.mul(E.push, 22 / k)));
+      if(!ro) svg += '<g class="dzplus" data-edge="' + e + '"><circle cx="' + sx(tip) + '" cy="' + sy(tip) + '" r="12" fill="#1E6FF4" stroke="#fff" stroke-width="2"/>' +
+        '<text x="' + sx(tip) + '" y="' + (+sy(tip) + 5).toFixed(1) + '" text-anchor="middle" font-size="17" font-weight="700" fill="#fff">+</text></g>';
+      const lab = pr(v3.add(E.mid, v3.mul(EDGE_FRAMES[e].out, 60 / k)));
+      svg += '<text x="' + sx(lab) + '" y="' + sy(lab) + '" text-anchor="middle" font-size="11" font-weight="700" fill="#64748b" style="paint-order:stroke;stroke:#f8fafc;stroke-width:3px" pointer-events="none">' + name.toUpperCase() + '</text>';
+    });
+    wrap.querySelector("svg").setAttribute("viewBox", "0 0 " + VW + " " + VH);
+    wrap.querySelector("svg").innerHTML = svg;
+    wrap.dataset.vw = VW;
+    if(DZ.pop) placeDzPop();
+  }
+  // the little menu next to a ⊕ or a selected wall
+  function openDzPop(kind, edge, i, at){
+    DZ.pop = { kind, edge, i, at }; DZ.pick = kind === "seg" ? { edge, i } : null;
+    const p = dzPart(), pop = $("dzPop"), name = (PART_EDGES.find(x => x[0] === edge) || [, ""])[1];
+    const segs = p.edges[edge], last = kind === "add" ? segs.filter(s => +s.len > 0).slice(-1)[0] : (i > 0 ? segs[i - 1] : null);
+    const cur = kind === "seg" ? segs[i] : null, prevDir = last ? last.dir : "out";
+    const len = cur ? cur.len : (last ? (isVertDir(last.dir) ? 12 : 30) : 30);
+    pop.innerHTML = '<div class="dzPopH">' + esc(name) + (kind === "add" ? ' — ново перо' : ' — перо ' + (i + 1)) + '<button type="button" class="dzPopX" data-pop="close">✕</button></div>' +
+      '<label>Дължина <span class="u">(мм, външно)</span><input type="number" min="1" step="1" id="dzPopLen" value="' + esc(len) + '"></label>' +
+      '<div class="dzPopDirs">' + Object.keys(PART_DIRS).map(d => {
+        const a = bendAngle(prevDir, d), same = a === 0;
+        return '<button type="button" class="btn small' + (cur && cur.dir === d ? ' primary' : '') + '" data-dir="' + d + '"' + (same ? ' disabled title="същата посока като предишното"' : '') + '>' +
+          PART_DIRS[d] + (a === 180 ? '<span class="u"> 180°</span>' : '') + '</button>'; }).join("") + '</div>' +
+      (kind === "seg" ? '<button type="button" class="btn danger" data-pop="del">Изтрий перото' + (i < segs.length - 1 ? ' (и следващите)' : '') + '</button>' : '<div class="muted">Изберете посока — перото се добавя в края на страната.</div>');
+    pop.hidden = false; placeDzPop();
+    pop.querySelectorAll("[data-dir]").forEach(b => b.addEventListener("click", () => {
+      const L = Math.max(1, Math.round(+$("dzPopLen").value || len));
+      if(kind === "add") segs.push({ len:L, dir:b.dataset.dir });
+      else{ cur.len = L; cur.dir = b.dataset.dir; }
+      closeDzPop(); dzChanged(true);
+    }));
+    $("dzPopLen").addEventListener("keydown", e => { if(e.key === "Enter" && cur){ cur.len = Math.max(1, Math.round(+e.target.value || cur.len)); closeDzPop(); dzChanged(true); } });
+    $("dzPopLen").addEventListener("change", e => { if(cur){ cur.len = Math.max(1, Math.round(+e.target.value || cur.len)); dzChanged(false); } });
+    const del = pop.querySelector('[data-pop="del"]'); if(del) del.addEventListener("click", () => { segs.splice(i); closeDzPop(); dzChanged(true); });
+    pop.querySelector('[data-pop="close"]').addEventListener("click", () => { closeDzPop(); renderDz3D(); });
+    if(kind === "seg") renderDz3D();
+  }
+  function closeDzPop(){ DZ.pop = null; DZ.pick = null; const pop = $("dzPop"); if(pop) pop.hidden = true; }
+  function placeDzPop(){
+    const pop = $("dzPop"), wrap = $("dz3dWrap"); if(!pop || !wrap || !DZ.pop) return;
+    const svg = wrap.querySelector("svg"), r = svg.getBoundingClientRect(), wr = wrap.getBoundingClientRect(), s = r.width / (+wrap.dataset.vw || 640);
+    let x = r.left - wr.left + DZ.pop.at[0] * s + 14, y = r.top - wr.top + DZ.pop.at[1] * s - 20;
+    x = Math.max(4, Math.min(x, wr.width - 250)); y = Math.max(4, Math.min(y, wr.height - 60));
+    pop.style.left = x + "px"; pop.style.top = y + "px";
+  }
+  // drag = rotate; a click on ⊕ / a wall opens the menu (the 3D container is created once per editor render)
+  function bindDz3D(){
+    const wrap = $("dz3dWrap"); if(!wrap) return;
+    const svg = wrap.querySelector("svg"), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    let drag = null;
+    const vb = e => { const r = svg.getBoundingClientRect(), s = (+wrap.dataset.vw || 640) / r.width; return [(e.clientX - r.left) * s, (e.clientY - r.top) * s]; };
+    svg.addEventListener("pointerdown", e => { drag = { x:e.clientX, y:e.clientY, yaw:DZ.view.yaw, pitch:DZ.view.pitch, moved:false, target:e.target, at:vb(e) }; svg.setPointerCapture(e.pointerId); });
+    svg.addEventListener("pointermove", e => {
+      if(!drag) return;
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if(!drag.moved && Math.hypot(dx, dy) < 5) return;
+      drag.moved = true;
+      DZ.view.yaw = drag.yaw + dx * 0.01;
+      DZ.view.pitch = Math.max(-1.5, Math.min(1.5, drag.pitch + dy * 0.01));
+      renderDz3D();
+    });
+    svg.addEventListener("pointerup", () => {
+      const d = drag; drag = null;
+      if(!d || d.moved || ro) return;
+      const plus = d.target.closest && d.target.closest(".dzplus"), seg = d.target.closest && d.target.closest(".dzseg");
+      if(plus) openDzPop("add", plus.dataset.edge, -1, d.at);
+      else if(seg) openDzPop("seg", seg.dataset.edge, +seg.dataset.i, d.at);
+      else if(DZ.pop){ closeDzPop(); renderDz3D(); }
+    });
+    wrap.parentElement.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => {
+      DZ.view = ({ iso:{ yaw:-0.55, pitch:0.62 }, front:{ yaw:0, pitch:0.12 }, side:{ yaw:-1.5708, pitch:0.12 }, top:{ yaw:0, pitch:1.5 }, under:{ yaw:-0.55, pitch:-0.5 } })[b.dataset.view];
+      closeDzPop(); renderDz3D();
+    }));
   }
 
   /* ---------- burger menu / pages ---------- */
