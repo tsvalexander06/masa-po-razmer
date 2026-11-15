@@ -1,0 +1,40 @@
+name: Check the Econt request on Econt's test server
+
+# Started by hand. Sends the same kind of "calculate price" request the admin sends, with
+# Econt's PUBLIC test account, to Econt's TEST server (demo.econt.com). Nothing is created,
+# no real login is used. A price here means the request is right; a login error on the real
+# server then comes from the account itself.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Calculate on demo.econt.com
+        run: |
+          cat > label.json <<'JSON'
+          {"label":{
+            "senderClient":{"name":"Тест Изпращач","phones":["0888000000"]},
+            "senderAddress":{"city":{"country":{"code3":"BGR"},"name":"Ботевград"},"street":"ул. Тестова 1"},
+            "receiverClient":{"name":"Тест Получател","phones":["0899000000"]},
+            "receiverAddress":{"city":{"country":{"code3":"BGR"},"name":"Пловдив"},"street":"ул. Вазов 12"},
+            "packCount":1,"shipmentType":"PACK","weight":25,
+            "shipmentDimensionsL":120,"shipmentDimensionsW":60,"shipmentDimensionsH":95,
+            "shipmentDescription":"Маса от неръждаема стомана (инокс)",
+            "paymentReceiverMethod":"cash"
+          },"mode":"calculate"}
+          JSON
+          for base in https://demo.econt.com/ee/services; do
+            echo "=== $base (public test account)"
+            curl -sS -m 40 -w '\n[HTTP %{http_code}]\n' -u 'iasp-dev:1Asp-dev' -H 'Content-Type: application/json' \
+              --data @label.json "$base/Shipments/LabelService.createLabel.json" | head -c 3000
+            echo
+          done
+          echo "=== real server, NO login (must refuse — shows its exact wording)"
+          curl -sS -m 40 -w '\n[HTTP %{http_code}]\n' -H 'Content-Type: application/json' --data @label.json \
+            "https://ee.econt.com/services/Shipments/LabelService.createLabel.json" | head -c 1500
