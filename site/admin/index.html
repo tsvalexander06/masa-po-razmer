@@ -180,6 +180,13 @@
   .dzViews{align-items:center;justify-content:space-between} .dzViewBtns{display:flex;gap:6px;flex-wrap:wrap}
   .dzBulk{align-items:center}
   .mergeBar{align-items:center}
+  .asmItem{border:1px solid var(--line);border-left:5px solid var(--brand);border-radius:10px;padding:8px 10px;margin:8px 0;background:#fbfdff}
+  .asmItem.sel{background:#eef5ff;box-shadow:0 0 0 2px #bfd7ff}
+  .asmHead{display:flex;gap:8px;align-items:center;flex-wrap:wrap} .asmBtns{margin-left:auto;display:flex;gap:6px}
+  .asmCtl{display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:6px;align-items:center;font-size:13px}
+  .asmGrp{display:flex;gap:5px;align-items:center;flex-wrap:wrap}
+  .asmGrp label{display:flex;gap:3px;align-items:center;font-weight:600} .asmGrp input{width:78px;margin-top:0} .asmGrp select{width:auto;margin-top:0}
+  table.joints{min-width:0}
   .econtCalc{margin-top:10px} .econtCalc .donebox,.econtCalc .warnbox{margin-top:8px} pre.econtRaw{white-space:pre-wrap;word-break:break-all;font-size:11px;max-height:260px;overflow:auto;background:#f8fafc;border:1px solid var(--line);border-radius:8px;padding:8px}
   .actions{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end;align-items:center;margin-top:14px}
   /* workshop print: only the print view of the open order */
@@ -294,6 +301,7 @@
     <div class="card noprint">
       <h2>Конструктор на детайли</h2>
       <div class="muted">Тави, кутии, плотове, рамки, профили — дъно + огъвания по всяка страна. Програмата смята заготовката, линиите на огъване от ръба, изрезите в ъглите и теглото. Готовият детайл се добавя в поръчка и се разкроява заедно с масите (и с фирата от склада).</div>
+      <div class="tabs" id="dzModes" style="margin-bottom:6px"></div>
       <div id="dzBind" style="margin-top:10px"></div>
       <div class="row" id="dzTop"></div>
       <div id="dzLib" style="margin-top:12px"></div>

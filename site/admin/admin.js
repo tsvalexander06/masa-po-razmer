@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr"];   // изпращач за Еконт (текст)
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", bd90:3, bd180:2, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", bd90:3, bd180:2, weldPerCm:1, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -19,6 +19,7 @@
     ["splashHem","Борд — подгъвка горе","мм, назад към стената; 0 = без"],
     ["bd90","Конструктор — корекция на огъване 90°","мм на огъване (по подразбиране за детайлите)"],
     ["bd180","Конструктор — корекция на подгъвка 180°","мм на подгъвка"],
+    ["weldPerCm","Конструктор — заварка","€ на см (сглобки)"],
     ["topCut","Работен плот — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["shelfCut","Долни плотове — намаление на заготовката","мм от външния габарит (дължина и ширина)"],
     ["tubeWall","Стена на тръбата","мм, за теглото"],
@@ -175,7 +176,8 @@
   const serTxt = o => o && o.serial ? orderSerial(o.serial) : "без №";
   const nTablesOf = o => (o.tables || []).reduce((a, t) => a + (+t.qty || 1), 0);
   // what an order holds, for the lists: "2", "2 + 3 дет.", "3 дет."
-  const itemsTxt = o => { const t = nTablesOf(o), d = (o.parts || []).reduce((a, p) => a + (+p.qty || 1), 0); return d ? (t ? t + " + " + d + " дет." : d + " дет.") : String(t); };
+  const itemsTxt = o => { const t = nTablesOf(o), d = (o.parts || []).reduce((a, p) => a + (+p.qty || 1), 0), e = (o.assemblies || []).reduce((a, x) => a + (+x.qty || 1), 0);
+    const bits = [t ? String(t) : "", d ? d + " дет." : "", e ? e + " ел." : ""].filter(Boolean); return bits.length ? bits.join(" + ") : "0"; };
   const fmtDate = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString("bg-BG") : ""; };
   const fmtDT = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleString("bg-BG", { dateStyle:"short", timeStyle:"short" }) : ""; };
   const idsTxt = list => list.length ? list.join(", ") : "—";
@@ -303,6 +305,7 @@
     if(!order){ v.hidden = true; CURRENT = null; PRICING = null; return; }
     order.tables = order.tables.map(normTable);
     order.parts = (order.parts || []).map(normPart);
+    order.assemblies = (order.assemblies || []).map(x => normAsm(x));
     host.appendChild(v); v.hidden = false;
     setTab(TAB);
     renderHead(); renderEdit(); recompute();
@@ -358,7 +361,7 @@
       '</div></div>';
     o.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="' + i + '"><h2 class="tablehead"><span class="name">Маса ' + (i + 1) + '</span>' +
-        ((o.tables.length > 1 || o.parts.length) && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
+        ((o.tables.length > 1 || o.parts.length || o.assemblies.length) && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
         '<div class="tgrid"><div class="drawbox"><svg class="draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
         '<div><div class="grid">' +
         FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
@@ -385,8 +388,18 @@
         '<div class="muted">дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм · лист ' + p.th + ' мм · ' + p.qty + ' бр. · заготовка ' + fmt(g.BW) + ' × ' + fmt(g.BH) + ' мм · огъвания ' + g.bends + '</div>' +
         '<div class="schemes" style="margin-top:8px">' + partSvg(p, g) + '</div></div>';
     });
+    o.assemblies.forEach((a, j) => {
+      const r = asmSvg(a, { yaw:-0.55, pitch:0.62 }, { tags:a.items.map((x, k) => asmTag(j, k)), VW:640, VH:300 });
+      h += '<div class="card asmcard" data-aj="' + j + '"><h2 class="tablehead"><span class="name">' + esc("Е" + (j + 1) + " · " + a.name) + (a.qty > 1 ? ' × ' + a.qty : '') + '</span>' +
+        '<button class="btn small" data-aact2="edit" type="button">' + (ro ? 'Виж в конструктора' : 'Редактирай в конструктора') + '</button>' +
+        '<button class="btn small" data-aact2="lib" type="button">Запази в библиотеката</button>' +
+        (ro ? '' : '<button class="btn danger" data-aact2="del" type="button">✕ Премахни</button>') + '</h2>' +
+        '<div class="muted">' + a.items.length + ' детайла · габарит ' + (r.size || [0, 0, 0]).map(v => fmt(v)).join(" × ") + ' мм · заварки ' + asmJoints(a).filter(x => x.on).length + '</div>' +
+        (r.svg ? '<figure class="scheme"><svg viewBox="0 0 ' + r.VW + ' ' + r.VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="background:#f8fafc">' + r.svg + '</svg></figure>' : '') + '</div>';
+    });
     if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button>' +
-      '<button class="btn" id="addP" type="button">➕ Добави детайл (конструктор)</button></div>';
+      '<button class="btn" id="addP" type="button">➕ Добави детайл (конструктор)</button>' +
+      '<button class="btn" id="addA" type="button">➕ Добави елемент (сглобка)</button></div>';
     $("order").innerHTML = h;
     o.tables.forEach((t, i) => drawTable(i));
     document.querySelectorAll("#order .partcard").forEach(card => {
@@ -403,7 +416,22 @@
         o.parts.splice(j, 1); renderEdit(); recompute(); edited();
       });
     });
+    document.querySelectorAll("#order .asmcard").forEach(card => {
+      const j = +card.dataset.aj, a = o.assemblies[j];
+      card.querySelector('[data-aact2="edit"]').addEventListener("click", () => openAsm({ orderId:o.id, aid:a.aid }));
+      const lb = card.querySelector('[data-aact2="lib"]');
+      lb.addEventListener("click", () => { const c = normAsm(JSON.parse(JSON.stringify(a))); c.aid = newAid(); LIB.assemblies.push(c); saveLib(); lb.textContent = "✓ В библиотеката"; lb.disabled = true; });
+      const del = card.querySelector('[data-aact2="del"]');
+      if(del) del.addEventListener("click", () => {
+        if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
+        o.assemblies.splice(j, 1); renderEdit(); recompute(); edited();
+      });
+    });
     if(ro) return;
+    $("addA").addEventListener("click", () => {
+      const na = normAsm({ name:"Елемент" }); o.assemblies.push(na); edited();
+      openAsm({ orderId:o.id, aid:na.aid });
+    });
     $("addP").addEventListener("click", () => {
       const np = normPart(JSON.parse(JSON.stringify(PART_TEMPLATES[0][1]))); o.parts.push(np); edited();
       openDesigner({ orderId:o.id, pid:np.pid });
@@ -943,6 +971,7 @@
     const o = order;
     const per = o.tables.map((t, i) => computeTable(t, i));
     const parts = (o.parts || []).map((p, i) => Object.assign({ p }, computePart(p, i)));
+    (o.assemblies || []).forEach((a, ai) => asmCutParts(a, ai).forEach((p, j) => parts.push(Object.assign({ p, asm:a, ai, first:j === 0 }, computePart(p, 0)))));
     const sheetPieces = [], tubePieces = [];
     let feet = 0;
     per.forEach((r, i) => {
@@ -1000,6 +1029,7 @@
     let weldOurs = 0, bendOurs = 0;
     o.tables.forEach(t => { const p = priceParts(t); weldOurs += p.weld * t.qty; bendOurs += p.bend * t.qty; });
     parts.forEach(r => { bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
+    (o.assemblies || []).forEach(a => { weldOurs += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
     const costMaterials = sheetCostOurs + tubeCostOurs;
     const capsOurs = o.tables.reduce((a, t) => a + priceParts(t).caps * t.qty, 0);   // тапички на краката
     const costTotal = costMaterials + weldOurs + bendOurs + capsOurs;
@@ -1072,6 +1102,7 @@
     // one card per designed part: blank, bends from the edge, scheme
     parts.forEach((r, i) => {
       const p = r.p, q = p.qty;
+      if(r.first) h += asmCard(r.asm, r.ai);
       h += '<div class="card"><h2>' + esc(r.tag + " · " + p.name) + (q > 1 ? ' — ' + q + ' бр.' : '') + '</h2><div class="printsum">' +
         '<b>дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм</b> · лист ' + p.th + ' мм · брой: <b>' + q + '</b> · огъвания: ' + r.g.bends + ' · тегло ≈ ' + r.g.kg.toFixed(1) + ' кг/бр.' +
         (p.notes.trim() ? '<br><b>Бележка:</b> ' + esc(p.notes) : '') + '</div>' +
@@ -1506,6 +1537,7 @@
     rest.forEach(o => {
       target.tables = (target.tables || []).concat(o.tables || []);
       target.parts = (target.parts || []).concat((o.parts || []).map(p => Object.assign({}, p, { pid:newPid() })));
+      target.assemblies = (target.assemblies || []).concat((o.assemblies || []).map(a => Object.assign({}, a, { aid:newAid() })));
       if(!target.name && o.name) target.name = o.name;
       if(!target.phone && o.phone) target.phone = o.phone;
       if(!target.delivery && o.delivery) target.delivery = o.delivery;
@@ -1694,7 +1726,7 @@
         takes.forEach(r => {
           if(r.id === "settings"){ S = Object.assign({}, DEFAULTS, r.data || {}); saveSettingsLocal(); }
           if(r.id === "invDone"){ INV.done = r.data || {}; saveInvLocal(); }
-          if(r.id === "partsLib"){ LIB = { items:((r.data && r.data.items) || []).map(normPart) }; try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} } }); } },
+          if(r.id === "partsLib"){ LIB = { items:((r.data && r.data.items) || []).map(normPart), assemblies:((r.data && r.data.assemblies) || []).map(x => normAsm(x)) }; try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} } }); } },
   };
   const rowData = (name, id) => { const r = COLS[name].rows().find(x => x.id === id); return r ? r.data : undefined; };
   function dirtyCount(){
@@ -2056,7 +2088,7 @@
   }
   // the cut-list entry of one part (like computeTable for a table)
   function computePart(p, idx){
-    const g = partGeo(p), tag = "Д" + (idx + 1);
+    const g = partGeo(p), tag = p.tag || ("Д" + (idx + 1));
     const n = g.notches, cuts = [["отпред ляво", n.bl], ["отпред дясно", n.br], ["отзад ляво", n.tl], ["отзад дясно", n.tr]].filter(c => c[1]);
     const note = "Готов: дъно " + fmt(p.L) + " × " + fmt(p.W) + " мм. " +
       PART_EDGES.filter(([e]) => g.ch[e].segs.length).map(([e, name]) => name + ": " + profileTxt(g.ch[e])).join("; ") + ". " +
@@ -2078,14 +2110,30 @@
   function orderClientPrice(o){
     const t = (o.tables && o.tables.length) ? priceFor({ tables:o.tables.map(normTable) }) : null;
     const parts = (o.parts || []).map(normPart).reduce((a, p) => a + partPrice(p), 0);
-    return (t ? t.total : 0) + parts;
+    const asms = (o.assemblies || []).map(x => normAsm(x)).reduce((a, x) => a + asmPrice(x), 0);
+    return (t ? t.total : 0) + parts + asms;
+  }
+  // print card of an element: the assembled 3D view, its parts and the welds
+  function asmCard(a, ai){
+    const r = asmSvg(a, { yaw:-0.55, pitch:0.62 }, { tags:a.items.map((x, j) => asmTag(ai, j)), VW:720, VH:380 }), J = asmJoints(a);
+    return '<div class="card asmcard"><h2>Елемент Е' + (ai + 1) + ' · ' + esc(a.name) + (a.qty > 1 ? ' — ' + a.qty + ' бр.' : '') + '</h2>' +
+      '<div class="printsum">Габарит: <b>' + r.size.map(v => fmt(v)).join(" × ") + ' мм</b> · детайли: <b>' + a.items.length + '</b> · заварки: <b>' + J.filter(j => j.on).length + '</b>' +
+        (a.notes.trim() ? '<br><b>Бележка:</b> ' + esc(a.notes) : '') + '</div>' +
+      '<figure class="scheme"><svg viewBox="0 0 ' + r.VW + ' ' + r.VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="background:#f8fafc">' + r.svg + '</svg>' +
+        '<figcaption>Сглобен вид · оранжево = заварка · детайлите са описани поотделно по-долу</figcaption></figure>' +
+      '<div class="tw"><table class="cut"><thead><tr><th>Детайл</th><th>Име</th><th>Бр. в елемента</th><th>Позиция X / Y / Z (мм)</th><th>Завъртане</th></tr></thead><tbody>' +
+        a.items.map((it, j) => '<tr><td class="size">' + asmTag(ai, j) + '</td><td>' + esc(it.part.name) + '</td><td class="q">' + it.part.qty + '</td><td class="size">' + it.pos.map(v => fmt(v)).join(" / ") +
+          '</td><td>' + (it.rot.some(Boolean) ? it.rot.map((v, k) => v ? ["X","Y","Z"][k] + " " + v * 90 + "°" : "").filter(Boolean).join(", ") : "—") + '</td></tr>').join("") + '</tbody></table></div>' +
+      (J.length ? '<h3>Заварки</h3><div class="tw"><table class="cut"><thead><tr><th>Свързани</th><th>Допир (мм)</th><th>Заварка</th></tr></thead><tbody>' +
+        J.map(j => '<tr><td>' + asmTag(ai, j.a) + ' ↔ ' + asmTag(ai, j.b) + '</td><td class="size">' + fmt(j.len) + '</td><td>' + (j.on ? j.cm + ' см' : 'НЕ') + '</td></tr>').join("") + '</tbody></table></div>' : '') +
+      '</div>';
   }
 
   /* ---------- Конструктор: страница ----------
      Библиотека от детайли (пази се и в облака) + редактор. Детайл от библиотеката се добавя като копие в поръчка;
      детайл от поръчка се редактира тук направо (докато разкроят не е потвърден). */
   var LIB_KEY = "mpr-admin-parts-v1";
-  var LIB = (function(){ try{ const d = JSON.parse(localStorage.getItem(LIB_KEY) || "null"); if(d && Array.isArray(d.items)) return { items:d.items.map(normPart) }; }catch(e){} return { items:[] }; })();
+  var LIB = (function(){ try{ const d = JSON.parse(localStorage.getItem(LIB_KEY) || "null"); if(d && Array.isArray(d.items)) return { items:d.items.map(normPart), assemblies:(d.assemblies || []).map(x => normAsm(x)) }; }catch(e){} return { items:[], assemblies:[] }; })();
   function saveLib(){ try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} cloudDirty(); }
   const sideAll = segs => ({ front:segs, back:segs, left:segs, right:segs });
   const PART_TEMPLATES = [
@@ -2096,17 +2144,23 @@
     ["Z-профил", { name:"Z-профил", L:1400, W:20, edges:{ front:[{ len:30, dir:"down" }], back:[{ len:30, dir:"up" }] } }],
     ["Празен детайл", { name:"Детайл", L:1000, W:500 }],
   ];
-  var DZ = { p:null, bind:null, libId:null };          // bind = { orderId, pid } when the part belongs to an order
+  var DZ = { mode:"part", p:null, bind:null, libId:null };   // bind = { orderId, pid } when the part belongs to an order; ref = a part inside an assembly
   function dzPart(){
+    if(DZ.ref) return DZ.ref();
     if(!DZ.bind) return DZ.p;
     const o = findOrder(DZ.bind.orderId), i = o && o.parts ? o.parts.findIndex(p => p.pid === DZ.bind.pid) : -1;
     if(i < 0) return null;
     if(!o.parts[i].edges || !o.parts[i].edges.front) o.parts[i] = normPart(o.parts[i]);
     return o.parts[i];
   }
-  function openDesigner(bind){ DZ = { p:null, bind:bind || null, libId:null }; showPage("designer"); }
+  function openDesigner(bind){ DZ = { mode:"part", p:null, bind:bind || null, libId:null }; showPage("designer"); }
+  // read-only when the part (or its assembly) belongs to an order whose cut is confirmed
+  function dzRO(){
+    const o = DZ.bind ? findOrder(DZ.bind.orderId) : (DZ.ref && DZ.asmBind ? findOrder(DZ.asmBind.orderId) : null);
+    return !!(o && o.stage !== "new");
+  }
   function dzChanged(structural){
-    if(DZ.bind){ saveSoon(); renderLists(); }
+    if(DZ.bind || (DZ.ref && DZ.asmBind)){ saveSoon(); renderLists(); }
     if(structural) renderDesigner(); else renderDzPreview();
   }
 
@@ -2152,16 +2206,25 @@
 
   function renderDesigner(){
     if(!$("dzEditor")) return;
-    const p = dzPart(), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
-    if(DZ.bind && !p){ DZ = { p:null, bind:null, libId:null }; }
-    $("dzBind").innerHTML = bound && p ? '<div class="note">Детайл от поръчка <b>' + esc(serTxt(bound) + (bound.name ? " · " + bound.name : "")) + '</b>' +
+    $("dzModes").innerHTML = [["part","Детайл"],["asm","Сглобка (елемент)"]].map(m => '<button class="tab' + ((DZ.mode || "part") === m[0] ? ' active' : '') + '" data-dzmode="' + m[0] + '" type="button">' + m[1] + '</button>').join("");
+    $("dzModes").querySelectorAll("[data-dzmode]").forEach(b => b.addEventListener("click", () => {
+      if((DZ.mode || "part") === b.dataset.dzmode && !DZ.ref) return;
+      DZ = b.dataset.dzmode === "asm" ? { mode:"asm", asm:null, asmBind:null, asmLibId:null, asmSel:null, p:null, bind:null } : { mode:"part", p:null, bind:null, libId:null };
+      renderDesigner();
+    }));
+    if(DZ.mode === "asm" && !DZ.ref){ renderAsmEditor(); return; }
+    const p = dzPart(), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = dzRO();
+    if(DZ.bind && !p){ DZ = { mode:"part", p:null, bind:null, libId:null }; }
+    $("dzBind").innerHTML = DZ.ref ? '<div class="note">Детайл от сглобка' + (DZ.asmBind ? ' в поръчка' : '') + (ro ? ' — само за преглед.' : ' — промените влизат в сглобката.') +
+      ' <button class="btn small" id="dzBackAsm" type="button">← Към сглобката</button></div>' : bound && p ? '<div class="note">Детайл от поръчка <b>' + esc(serTxt(bound) + (bound.name ? " · " + bound.name : "")) + '</b>' +
       (ro ? ' — разкроят е потвърден, затова е само за преглед.' : ' — промените се записват направо в поръчката.') +
       ' <button class="btn small" id="dzBack" type="button">← Към поръчката</button></div>' : '';
-    $("dzTop").innerHTML = bound ? '' : '<span class="muted">Нов детайл от шаблон:</span> ' + PART_TEMPLATES.map((t, i) => '<button class="btn small" data-tpl="' + i + '" type="button">+ ' + esc(t[0]) + '</button>').join(" ");
+    $("dzTop").innerHTML = (bound || DZ.ref) ? '' : '<span class="muted">Нов детайл от шаблон:</span> ' + PART_TEMPLATES.map((t, i) => '<button class="btn small" data-tpl="' + i + '" type="button">+ ' + esc(t[0]) + '</button>').join(" ");
     renderDzLib();
     $("dzTop").querySelectorAll("[data-tpl]").forEach(b => b.addEventListener("click", () => {
       DZ = { p:normPart(JSON.parse(JSON.stringify(PART_TEMPLATES[+b.dataset.tpl][1]))), bind:null, libId:null }; renderDesigner();
     }));
+    const backA = $("dzBackAsm"); if(backA) backA.addEventListener("click", () => { DZ.mode = "asm"; DZ.ref = null; renderDesigner(); });
     const back = $("dzBack"); if(back) back.addEventListener("click", () => { SEL.work = bound.stage === "new" ? bound.id : SEL.work; if(bound.stage === "processing") SEL.processing = bound.id; showPage(bound.stage === "processing" ? "processing" : "work"); });
     if(!p){ $("dzEditor").innerHTML = '<div class="card"><div class="empty">Изберете шаблон или детайл от библиотеката, за да започнете.</div></div>'; return; }
 
@@ -2197,7 +2260,10 @@
       '<div class="card"><h2>Заготовка и схема</h2><div id="dzPrev"></div></div>';
     // actions
     h += '<div class="card noprint"><div class="actions" style="justify-content:flex-start;margin-top:0">';
-    if(bound){
+    if(DZ.ref){
+      h += '<button class="btn" id="dzToLib" type="button">Запази копие в библиотеката</button>' +
+        '<button class="btn primary" id="dzDoneAsm" type="button">Готово — към сглобката</button>';
+    }else if(bound){
       h += '<button class="btn" id="dzToLib" type="button">Запази копие в библиотеката</button>' +
         '<button class="btn primary" id="dzDone" type="button">Готово — към поръчката</button>';
     }else{
@@ -2260,6 +2326,7 @@
     if($("dzSave")) $("dzSave").addEventListener("click", () => { saveToLib(false); const b = $("dzSave"); if(b) b.textContent = "Запази промените в библиотеката"; });
     if($("dzToLib")) $("dzToLib").addEventListener("click", () => saveToLib(true));
     if($("dzDone")) $("dzDone").addEventListener("click", () => { $("dzBack") && $("dzBack").click(); });
+    if($("dzDoneAsm")) $("dzDoneAsm").addEventListener("click", () => { $("dzBackAsm").click(); });
     if($("dzAdd")) $("dzAdd").addEventListener("click", () => {
       const copy = normPart(JSON.parse(JSON.stringify(p))); copy.pid = newPid();
       const tid = $("dzTarget").value;
@@ -2327,7 +2394,7 @@
   }
   function renderDz3D(){
     const wrap = $("dz3dWrap"), p = dzPart(); if(!wrap || !p) return;
-    const g = partGeo(p), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    const g = partGeo(p), ro = dzRO();
     const V = DZ.view || (DZ.view = { yaw:-0.55, pitch:0.62 });
     const { faces, ends } = partFaces(p, g);
     const cx = p.L / 2, cy = p.W / 2, cyw = Math.cos(V.yaw), syw = Math.sin(V.yaw), cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
@@ -2411,7 +2478,7 @@
   // drag = rotate; a click on ⊕ / a wall opens the menu (the 3D container is created once per editor render)
   function bindDz3D(){
     const wrap = $("dz3dWrap"); if(!wrap) return;
-    const svg = wrap.querySelector("svg"), bound = DZ.bind ? findOrder(DZ.bind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    const svg = wrap.querySelector("svg"), ro = dzRO();
     let drag = null;
     const vb = e => { const r = svg.getBoundingClientRect(), s = (+wrap.dataset.vw || 640) / r.width; return [(e.clientX - r.left) * s, (e.clientY - r.top) * s]; };
     svg.addEventListener("pointerdown", e => { drag = { x:e.clientX, y:e.clientY, yaw:DZ.view.yaw, pitch:DZ.view.pitch, moved:false, target:e.target, at:vb(e) }; svg.setPointerCapture(e.pointerId); });
@@ -2435,6 +2502,299 @@
     wrap.parentElement.querySelectorAll("[data-view]").forEach(b => b.addEventListener("click", () => {
       DZ.view = ({ iso:{ yaw:-0.55, pitch:0.62 }, front:{ yaw:0, pitch:0.12 }, side:{ yaw:-1.5708, pitch:0.12 }, top:{ yaw:0, pitch:1.5 }, under:{ yaw:-0.55, pitch:-0.5 } })[b.dataset.view];
       closeDzPop(); renderDz3D();
+    }));
+  }
+
+  /* ---------- Сглобка (елемент): детайли, наредени един до друг в 3D ----------
+     Всеки детайл в сглобката има позиция (мм) и завъртане (стъпки по 90° около X, Y, Z). „Постави до“ слага
+     детайла плътно до друг (от избрана страна, подравнен в центъра / началото / края). Детайли, чиито габарити
+     се допират, се заваряват по подразбиране — всяка заварка може да се изключи или да ѝ се смени дължината. */
+  const ASM_SIDES = { left:["ляво", 0, -1], right:["дясно", 0, 1], front:["отпред", 1, -1], back:["отзад", 1, 1], below:["отдолу", 2, -1], above:["отгоре", 2, 1] };
+  const ASM_ALIGN = { center:"в центъра", start:"от началото", end:"от края" };
+  const ASM_HUES = [210, 28, 145, 280, 0, 185, 50, 320];
+  const newAid = () => "a" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  const newIid = () => "i" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5);
+  function normAsm(x){
+    const a = x || {};
+    return { aid:a.aid || newAid(), name:String(a.name || "Елемент"), qty:Math.max(1, Math.round(+a.qty || 1)),
+      items:(a.items || []).map(it => ({ iid:it.iid || newIid(), part:normPart(it.part), pos:[0, 1, 2].map(k => +((it.pos || [])[k]) || 0),
+        rot:[0, 1, 2].map(k => ((Math.round(+((it.rot || [])[k]) || 0) % 4) + 4) % 4) })),
+      welds:Object.assign({}, a.welds || {}), notes:String(a.notes || "") };
+  }
+  // quarter turns around X, then Y, then Z
+  function rotQ(q, r){
+    let x = q[0], y = q[1], z = q[2], t;
+    for(let k = 0; k < r[0]; k++){ t = y; y = -z; z = t; }
+    for(let k = 0; k < r[1]; k++){ t = x; x = z; z = -t; }
+    for(let k = 0; k < r[2]; k++){ t = x; x = -y; y = t; }
+    return [x, y, z];
+  }
+  function itemFaces(it){
+    const g = partGeo(it.part), { faces } = partFaces(it.part, g), T = q => v3.add(rotQ(q, it.rot), it.pos);
+    return faces.map(f => Object.assign({}, f, { pts:f.pts.map(T), holes:(f.holes || []).map(h => h.map(T)) }));
+  }
+  function boxOf(pts){
+    const mn = [0, 1, 2].map(k => Math.min(...pts.map(q => q[k]))), mx = [0, 1, 2].map(k => Math.max(...pts.map(q => q[k])));
+    return { min:mn, max:mx };
+  }
+  const itemBox = it => boxOf(itemFaces(it).flatMap(f => f.pts));
+  // put `it` right next to `target`, on `side`, aligned on the other two axes
+  function placeNext(it, target, side, align){
+    const T = itemBox(target); it.pos = [0, 0, 0]; const M = itemBox(it);
+    const [, ax, sg] = ASM_SIDES[side];
+    const pos = [0, 0, 0];
+    pos[ax] = sg > 0 ? T.max[ax] - M.min[ax] : T.min[ax] - M.max[ax];
+    [0, 1, 2].filter(k => k !== ax).forEach(k => {
+      pos[k] = align === "start" ? T.min[k] - M.min[k] : align === "end" ? T.max[k] - M.max[k] : (T.min[k] + T.max[k]) / 2 - (M.min[k] + M.max[k]) / 2;
+    });
+    it.pos = pos.map(v => Math.round(v * 10) / 10);
+  }
+  const pairKey = (a, b) => a < b ? a + "|" + b : b + "|" + a;
+  // parts whose outlines touch (gap ≤ 1 mm on one axis, overlapping on the other two) = a joint, welded unless switched off
+  function asmJoints(asm){
+    const boxes = asm.items.map(it => ({ it, b:itemBox(it) })), out = [];
+    for(let i = 0; i < boxes.length; i++) for(let j = i + 1; j < boxes.length; j++){
+      const A = boxes[i].b, B = boxes[j].b;
+      for(let ax = 0; ax < 3; ax++){
+        const gap = Math.max(A.min[ax] - B.max[ax], B.min[ax] - A.max[ax]);
+        const ov = [0, 1, 2].filter(k => k !== ax).map(k => Math.min(A.max[k], B.max[k]) - Math.max(A.min[k], B.min[k]));
+        if(Math.abs(gap) <= 1 && ov.every(v => v > 0)){
+          const key = pairKey(boxes[i].it.iid, boxes[j].it.iid), w = asm.welds[key] || {};
+          // the joint marker: on the touching faces, in the middle of the overlap
+          const mid = [0, 1, 2].map(k => k === ax ? (A.max[k] <= B.min[k] + 1 ? (A.max[k] + B.min[k]) / 2 : (B.max[k] + A.min[k]) / 2)
+            : (Math.max(A.min[k], B.min[k]) + Math.min(A.max[k], B.max[k])) / 2);
+          out.push({ key, a:i, b:j, ax, len:Math.max(...ov), on:w.on !== false, cm:+w.cm > 0 ? +w.cm : 12, mid });
+          break;
+        }
+      }
+    }
+    return out;
+  }
+  const asmTag = (ai, j) => "Е" + (ai + 1) + "." + (j + 1);
+  // the parts of an element as cut-list parts (quantity × number of elements)
+  function asmCutParts(asm, ai){
+    return asm.items.map((it, j) => Object.assign(normPart(JSON.parse(JSON.stringify(it.part))), { qty:it.part.qty * asm.qty, tag:asmTag(ai, j) }));
+  }
+  function asmPrice(asm){
+    const m = 1 + PRICE.markupPct / 100;
+    const parts = asm.items.reduce((a, it) => a + partPrice(Object.assign({}, it.part, { qty:it.part.qty })), 0);
+    const welds = asmJoints(asm).filter(j => j.on).reduce((a, j) => a + j.cm * (+S.weldPerCm || 0), 0) * m;
+    return (parts + welds) * asm.qty;
+  }
+  // the whole element in 3D (one colour per part, joints marked); `opts.sel` = selected item id
+  function asmSvg(asm, V, opts){
+    opts = opts || {};
+    const all = [];
+    asm.items.forEach((it, idx) => itemFaces(it).forEach(f => all.push({ f, idx })));
+    if(!all.length) return { svg:'', VW:640, VH:400 };
+    const pts = all.flatMap(q => q.f.pts), B = boxOf(pts), c = [0, 1, 2].map(k => (B.min[k] + B.max[k]) / 2);
+    const cyw = Math.cos(V.yaw), syw = Math.sin(V.yaw), cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
+    const pr = q => { const x = q[0] - c[0], y = q[1] - c[1], z = q[2] - c[2];
+      const x1 = x * cyw - y * syw, y1 = x * syw + y * cyw; return [x1, -(z * cp + y1 * sp), y1 * cp - z * sp]; };
+    const P = all.map(q => ({ q, P:q.f.pts.map(pr), H:(q.f.holes || []).map(h => h.map(pr)) }));
+    const flat = P.flatMap(r => r.P);
+    const minX = Math.min(...flat.map(r => r[0])), maxX = Math.max(...flat.map(r => r[0])), minY = Math.min(...flat.map(r => r[1])), maxY = Math.max(...flat.map(r => r[1]));
+    const VW = opts.VW || 640, VH = opts.VH || 400, pad = 40, k = Math.min((VW - 2 * pad) / Math.max(1, maxX - minX), (VH - 2 * pad) / Math.max(1, maxY - minY));
+    const ox = (VW - (maxX - minX) * k) / 2, oy = (VH - (maxY - minY) * k) / 2;
+    const sx = r => (ox + (r[0] - minX) * k).toFixed(1), sy = r => (oy + (r[1] - minY) * k).toFixed(1);
+    const L = [-0.35, -0.5, 0.8], ln = Math.hypot(...L);
+    P.forEach(r => { r.depth = r.P.reduce((a, p) => a + p[2], 0) / r.P.length; });
+    P.sort((a, b) => b.depth - a.depth);
+    let svg = '<rect x="0" y="0" width="' + VW + '" height="' + VH + '" fill="transparent"/>';
+    P.forEach(r => {
+      const f = r.q.f, n = v3.cross(v3.sub(f.pts[1], f.pts[0]), v3.sub(f.pts[3], f.pts[0])), nl = Math.hypot(...n) || 1;
+      const lit = Math.abs((n[0] * L[0] + n[1] * L[1] + n[2] * L[2]) / nl / ln), l = Math.round(60 + lit * 28);
+      const it = asm.items[r.q.idx], sel = opts.sel === it.iid, hue = ASM_HUES[r.q.idx % ASM_HUES.length];
+      const d = 'M' + r.P.map(p => sx(p) + ',' + sy(p)).join(' L') + ' Z' + r.H.map(h => ' M' + h.map(p => sx(p) + ',' + sy(p)).join(' L') + ' Z').join('');
+      svg += '<path d="' + d + '" fill-rule="evenodd" fill="hsl(' + hue + ',' + (sel ? 70 : 30) + '%,' + l + '%)" stroke="' + (sel ? '#1e293b' : 'hsl(' + hue + ',35%,32%)') + '" stroke-width="' + (sel ? 1.8 : 0.9) + '"' +
+        (opts.interactive ? ' class="asmface" data-iid="' + it.iid + '"' : '') + '/>';
+    });
+    asmJoints(asm).filter(j => j.on).forEach(j => { const m = pr(j.mid);
+      svg += '<circle cx="' + sx(m) + '" cy="' + sy(m) + '" r="6" fill="#f97316" stroke="#fff" stroke-width="1.5" pointer-events="none"/>'; });
+    asm.items.forEach((it, idx) => { const b = itemBox(it), top = pr([(b.min[0] + b.max[0]) / 2, (b.min[1] + b.max[1]) / 2, b.max[2]]);
+      svg += '<text x="' + sx(top) + '" y="' + (+sy(top) - 8).toFixed(1) + '" text-anchor="middle" font-size="12" font-weight="800" fill="hsl(' + ASM_HUES[idx % ASM_HUES.length] + ',60%,30%)" style="paint-order:stroke;stroke:#fff;stroke-width:3px" pointer-events="none">' +
+        esc((opts.tags ? opts.tags[idx] : "Д" + (idx + 1))) + '</text>'; });
+    return { svg, VW, VH, size:[0, 1, 2].map(k => B.max[k] - B.min[k]) };
+  }
+
+  /* ---------- Конструктор: режим „Сглобка“ ---------- */
+  function dzAsm(){ if(DZ.asmBind){ const o = findOrder(DZ.asmBind.orderId); return o && (o.assemblies || []).find(a => a.aid === DZ.asmBind.aid) || null; } return DZ.asm; }
+  function openAsm(bind){ DZ = { mode:"asm", p:null, bind:null, libId:null, asm:null, asmBind:bind || null, asmLibId:null, asmSel:null }; showPage("designer"); }
+  function asmChanged(full){
+    if(DZ.asmBind){ saveSoon(); renderLists(); }
+    if(full) renderAsmEditor(); else { renderAsm3D(); renderAsmJoints(); }
+  }
+  function renderAsmLib(){
+    const el = $("dzLib"); if(!el) return;
+    el.innerHTML = LIB.assemblies.length
+      ? '<div class="tw"><table class="cut list dzlib"><thead><tr><th>Сглобки в библиотеката</th><th>Детайли</th><th>Габарит (мм)</th><th></th></tr></thead><tbody>' +
+        LIB.assemblies.map(a => { const r = a.items.length ? asmSvg(a, { yaw:-0.55, pitch:0.62 }) : { size:[0, 0, 0] };
+          return '<tr class="' + (DZ.asmLibId === a.aid && !DZ.asmBind ? "sel" : "") + '"><td><b>' + esc(a.name) + '</b>' + (a.qty > 1 ? ' <span class="muted">× ' + a.qty + '</span>' : '') + '</td><td class="q">' + a.items.length +
+            '</td><td class="size">' + r.size.map(v => fmt(v)).join(" × ") + '</td><td class="acts"><button class="btn small" data-aopen="' + esc(a.aid) + '" type="button">Отвори</button> <button class="btn danger" data-adel="' + esc(a.aid) + '" type="button">Изтрий</button></td></tr>'; }).join("") +
+        '</tbody></table></div>'
+      : '<div class="muted"><b>Няма запазени сглобки.</b> Направете нова отгоре и натиснете „Запази в библиотеката“.</div>';
+    el.querySelectorAll("[data-aopen]").forEach(b => b.addEventListener("click", () => {
+      const a = LIB.assemblies.find(x => x.aid === b.dataset.aopen); if(!a) return;
+      DZ = { mode:"asm", p:null, bind:null, libId:null, asm:normAsm(JSON.parse(JSON.stringify(a))), asmBind:null, asmLibId:a.aid, asmSel:null }; renderDesigner();
+    }));
+    el.querySelectorAll("[data-adel]").forEach(b => b.addEventListener("click", () => {
+      if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Сигурно? Натисни пак"; return; }
+      LIB.assemblies = LIB.assemblies.filter(a => a.aid !== b.dataset.adel); if(DZ.asmLibId === b.dataset.adel) DZ.asmLibId = null; saveLib(); renderDesigner();
+    }));
+  }
+  function renderAsmEditor(){
+    const a = dzAsm(), bound = DZ.asmBind ? findOrder(DZ.asmBind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    $("dzBind").innerHTML = bound && a ? '<div class="note">Сглобка от поръчка <b>' + esc(serTxt(bound) + (bound.name ? " · " + bound.name : "")) + '</b>' +
+      (ro ? ' — разкроят е потвърден, само за преглед.' : ' — промените се записват в поръчката.') + ' <button class="btn small" id="dzBack" type="button">← Към поръчката</button></div>' : '';
+    $("dzTop").innerHTML = bound ? '' : '<button class="btn small" id="asmNew" type="button">+ Нова сглобка</button>';
+    renderAsmLib();
+    if($("asmNew")) $("asmNew").addEventListener("click", () => { DZ.asm = normAsm({ name:"Елемент" }); DZ.asmLibId = null; DZ.asmSel = null; renderAsmEditor(); });
+    const back = $("dzBack"); if(back) back.addEventListener("click", () => { if(bound.stage === "processing"){ SEL.processing = bound.id; showPage("processing"); } else { SEL.work = bound.id; showPage("work"); } });
+    if(!a){ $("dzEditor").innerHTML = '<div class="card"><div class="empty">Натиснете „+ Нова сглобка“ или отворете сглобка от библиотеката.</div></div>'; return; }
+    const dis = ro ? " disabled" : "";
+    const partOpts = '<optgroup label="Библиотека">' + LIB.items.map(p => '<option value="lib:' + esc(p.pid) + '">' + esc(p.name) + '</option>').join("") + '</optgroup>' +
+      '<optgroup label="Шаблони">' + PART_TEMPLATES.map((t, i) => '<option value="tpl:' + i + '">' + esc(t[0]) + '</option>').join("") + '</optgroup>';
+    let h = '<div class="card"><h2>Сглобка — 3D</h2>' +
+      '<div class="dz3dWrap" id="asm3dWrap"><svg id="asm3d" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
+      '<div class="row dzViews"><span class="muted" id="asmSize"></span><span class="dzViewBtns">' +
+        [["iso","3D"],["front","отпред"],["side","отстрани"],["top","отгоре"],["under","отдолу"]].map(v => '<button class="btn small" type="button" data-aview="' + v[0] + '">' + v[1] + '</button>').join("") +
+      '</span></div><div class="muted">Влачете, за да завъртите · клик върху детайл го избира · оранжевите точки са заварките.</div></div>' +
+      '<div class="card"><h2>Елемент</h2><div class="grid">' +
+        '<label>Име<input type="text" id="asmName" value="' + esc(a.name) + '"' + dis + '></label>' +
+        '<label>Брой елементи<input type="number" min="1" step="1" id="asmQty" value="' + a.qty + '"' + dis + '></label></div>' +
+      '<h3>Детайли</h3><div id="asmItems">';
+    a.items.forEach((it, j) => {
+      const g = partGeo(it.part), others = a.items.filter(x => x !== it), hue = ASM_HUES[j % ASM_HUES.length];
+      h += '<div class="asmItem' + (DZ.asmSel === it.iid ? ' sel' : '') + '" data-iid="' + it.iid + '" style="border-left-color:hsl(' + hue + ',55%,50%)">' +
+        '<div class="asmHead"><b>Д' + (j + 1) + '</b> ' + esc(it.part.name) + ' <span class="muted">· дъно ' + fmt(it.part.L) + ' × ' + fmt(it.part.W) + ' · заготовка ' + fmt(g.BW) + ' × ' + fmt(g.BH) + (it.part.qty > 1 ? ' · ' + it.part.qty + ' бр. в елемента' : '') + '</span>' +
+          '<span class="asmBtns"><button class="btn small" data-aact="edit" type="button">' + (ro ? 'Виж детайла' : 'Редактирай детайла') + '</button>' + (ro ? '' : '<button class="btn danger" data-aact="del" type="button">✕</button>') + '</span></div>' +
+        '<div class="asmCtl">' +
+          '<span class="asmGrp">Позиция (мм): ' + ['X','Y','Z'].map((n, k) => '<label>' + n + '<input type="number" step="1" data-pos="' + k + '" value="' + esc(it.pos[k]) + '"' + dis + '></label>').join("") + '</span>' +
+          '<span class="asmGrp">Завърти 90°: ' + ['X','Y','Z'].map((n, k) => '<button class="btn small" type="button" data-rot="' + k + '"' + dis + '>↻ ' + n + '</button>').join("") + '</span>' +
+          (others.length ? '<span class="asmGrp">Постави до <select data-nt' + dis + '>' + others.map(o => '<option value="' + o.iid + '">Д' + (a.items.indexOf(o) + 1) + ' · ' + esc(o.part.name) + '</option>').join("") + '</select>' +
+            '<select data-ns' + dis + '>' + Object.keys(ASM_SIDES).map(s => '<option value="' + s + '">' + ASM_SIDES[s][0] + '</option>').join("") + '</select>' +
+            '<select data-na' + dis + '>' + Object.keys(ASM_ALIGN).map(s => '<option value="' + s + '">' + ASM_ALIGN[s] + '</option>').join("") + '</select>' +
+            '<button class="btn small primary" type="button" data-aact="place"' + dis + '>Постави</button></span>' : '') +
+        '</div></div>';
+    });
+    h += '</div>' + (ro ? '' : '<div class="row"><select id="asmAddSel">' + partOpts + '</select><button class="btn" id="asmAdd" type="button">+ Добави детайл</button>' +
+      '<span class="muted">новият детайл се поставя вдясно от последния — после „Постави до“ го мести, където трябва</span></div>') +
+      '<h3>Заварки</h3><div id="asmJoints"></div>' +
+      '<label style="margin-top:10px">Бележка<textarea rows="2" id="asmNotes"' + dis + '>' + esc(a.notes) + '</textarea></label></div>';
+    h += '<div class="card noprint"><div class="actions" style="justify-content:flex-start;margin-top:0">';
+    if(bound) h += '<button class="btn" id="asmToLib" type="button">Запази копие в библиотеката</button><button class="btn primary" id="asmDone" type="button">Готово — към поръчката</button>';
+    else{
+      h += '<button class="btn" id="asmSave" type="button">' + (DZ.asmLibId ? 'Запази промените в библиотеката' : 'Запази в библиотеката') + '</button>' +
+        '<label class="dzTarget">Добави в<select id="asmTarget"><option value="">нова поръчка</option>' +
+          byStage("new").map(o => '<option value="' + esc(o.id) + '">' + esc((o.name || "без име") + (o.serial ? " · " + orderSerial(o.serial) : "") + " (Разкрой)") + '</option>').join("") + '</select></label>' +
+        '<button class="btn primary" id="asmAddOrder" type="button">Добави в поръчка</button>';
+    }
+    h += '</div><div class="status" id="asmStatus"></div></div>';
+    $("dzEditor").innerHTML = h;
+    renderAsm3D(); renderAsmJoints(); bindAsm3D();
+    const ed = $("dzEditor");
+    $("asmName").addEventListener("input", e => { a.name = e.target.value; asmChanged(false); });
+    $("asmQty").addEventListener("input", e => { a.qty = Math.max(1, Math.round(+e.target.value || 1)); asmChanged(false); });
+    $("asmNotes").addEventListener("input", e => { a.notes = e.target.value; asmChanged(false); });
+    ed.querySelectorAll(".asmItem").forEach(row => {
+      const it = a.items.find(x => x.iid === row.dataset.iid);
+      row.querySelectorAll("[data-pos]").forEach(inp => inp.addEventListener("input", () => { it.pos[+inp.dataset.pos] = +inp.value || 0; asmChanged(false); }));
+      row.querySelectorAll("[data-rot]").forEach(b => b.addEventListener("click", () => { const k = +b.dataset.rot; it.rot[k] = (it.rot[k] + 1) % 4; DZ.asmSel = it.iid; asmChanged(true); }));
+      const pl = row.querySelector('[data-aact="place"]');
+      if(pl) pl.addEventListener("click", () => {
+        const t = a.items.find(x => x.iid === row.querySelector("[data-nt]").value);
+        placeNext(it, t, row.querySelector("[data-ns]").value, row.querySelector("[data-na]").value); DZ.asmSel = it.iid; asmChanged(true);
+      });
+      row.querySelector('[data-aact="edit"]').addEventListener("click", () => {
+        const aid = a.aid, iid = it.iid, ab = DZ.asmBind, lib = DZ.asmLibId, asmObj = DZ.asm;
+        DZ = { mode:"part", p:null, bind:null, libId:null, asm:asmObj, asmBind:ab, asmLibId:lib, asmSel:iid,
+          ref:() => { const A = ab ? dzAsmFor(ab) : asmObj; const x = A && A.items.find(y => y.iid === iid); return x ? x.part : null; }, refAsm:true };
+        renderDesigner();
+      });
+      const del = row.querySelector('[data-aact="del"]');
+      if(del) del.addEventListener("click", () => {
+        if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно?"; return; }
+        a.items = a.items.filter(x => x !== it); asmChanged(true);
+      });
+    });
+    const add = $("asmAdd");
+    if(add) add.addEventListener("click", () => {
+      const v = $("asmAddSel").value; let part;
+      if(v.startsWith("lib:")){ const src = LIB.items.find(p => p.pid === v.slice(4)); part = src ? normPart(JSON.parse(JSON.stringify(src))) : null; }
+      else part = normPart(JSON.parse(JSON.stringify(PART_TEMPLATES[+v.slice(4)][1])));
+      if(!part) return;
+      part.pid = newPid();
+      const it = { iid:newIid(), part, pos:[0, 0, 0], rot:[0, 0, 0] };
+      const last = a.items[a.items.length - 1];
+      a.items.push(it); if(last) placeNext(it, last, "right", "start");
+      DZ.asmSel = it.iid; asmChanged(true);
+    });
+    const msg = (m, k) => { const el = $("asmStatus"); el.className = "status " + (k || ""); el.textContent = m; };
+    const toLib = asCopy => {
+      const copy = normAsm(JSON.parse(JSON.stringify(a)));
+      if(!asCopy && DZ.asmLibId && LIB.assemblies.some(x => x.aid === DZ.asmLibId)){ copy.aid = DZ.asmLibId; LIB.assemblies = LIB.assemblies.map(x => x.aid === DZ.asmLibId ? copy : x); }
+      else{ copy.aid = newAid(); LIB.assemblies.push(copy); if(!asCopy) DZ.asmLibId = copy.aid; }
+      saveLib(); renderAsmLib(); msg("✓ Запазено в библиотеката: „" + copy.name + "“.", "ok");
+    };
+    if($("asmSave")) $("asmSave").addEventListener("click", () => toLib(false));
+    if($("asmToLib")) $("asmToLib").addEventListener("click", () => toLib(true));
+    if($("asmDone")) $("asmDone").addEventListener("click", () => $("dzBack").click());
+    if($("asmAddOrder")) $("asmAddOrder").addEventListener("click", () => {
+      if(!a.items.length){ msg("Добавете поне един детайл.", "warn"); return; }
+      const copy = normAsm(JSON.parse(JSON.stringify(a))); copy.aid = newAid();
+      const tid = $("asmTarget").value; let o = tid ? findOrder(tid) : null;
+      if(!o){ o = makeRecord(null, ""); o.tables = []; o.parts = []; ORD.orders.push(o); }
+      o.assemblies = (o.assemblies || []).concat([copy]);
+      saveOrders(); SEL.work = o.id; TAB = "print"; showPage("work");
+      setStatus("✓ Елементът „" + copy.name + "“ е добавен в " + (tid ? "поръчката на " + (o.name || "без име") : "нова поръчка — попълнете клиента в „Маси — редакция“") + ".", "ok");
+    });
+  }
+  function dzAsmFor(bind){ const o = findOrder(bind.orderId); return o && (o.assemblies || []).find(a => a.aid === bind.aid) || null; }
+  function renderAsm3D(){
+    const wrap = $("asm3dWrap"), a = dzAsm(); if(!wrap || !a) return;
+    const V = DZ.view || (DZ.view = { yaw:-0.55, pitch:0.62 });
+    const r = asmSvg(a, V, { interactive:true, sel:DZ.asmSel });
+    const svg = wrap.querySelector("svg"); svg.setAttribute("viewBox", "0 0 " + r.VW + " " + r.VH); svg.innerHTML = r.svg || '<text x="320" y="200" text-anchor="middle" fill="#64748b" font-size="14">Добавете детайли отдолу</text>';
+    wrap.dataset.vw = r.VW;
+    const sz = $("asmSize"); if(sz) sz.textContent = a.items.length ? "Габарит на елемента: " + r.size.map(v => fmt(v)).join(" × ") + " мм (Д × Ш × В)" : "";
+  }
+  function renderAsmJoints(){
+    const el = $("asmJoints"), a = dzAsm(); if(!el || !a) return;
+    const bound = DZ.asmBind ? findOrder(DZ.asmBind.orderId) : null, ro = !!(bound && bound.stage !== "new");
+    const J = asmJoints(a);
+    el.innerHTML = J.length ? '<div class="tw"><table class="cut joints"><thead><tr><th>Свързани</th><th>Допир (мм)</th><th>Заварка</th><th>Дължина (см)</th></tr></thead><tbody>' +
+      J.map(j => '<tr><td>Д' + (j.a + 1) + ' ↔ Д' + (j.b + 1) + ' <span class="muted">' + esc(a.items[j.a].part.name + " / " + a.items[j.b].part.name) + '</span></td><td class="size">' + fmt(j.len) + '</td>' +
+        '<td><input type="checkbox" data-wk="' + j.key + '"' + (j.on ? " checked" : "") + (ro ? " disabled" : "") + '></td>' +
+        '<td><input type="number" min="1" step="1" data-wl="' + j.key + '" value="' + j.cm + '"' + (ro || !j.on ? " disabled" : "") + ' style="width:80px;margin-top:0"></td></tr>').join("") + '</tbody></table></div>' +
+      '<div class="muted" style="margin-top:4px">Детайлите, които се допират, се заваряват по подразбиране. Цена: ' + fmt(S.weldPerCm) + ' €/см (Настройки), с надценката.</div>'
+      : '<div class="muted">Няма допиращи се детайли — поставете ги един до друг („Постави до“), за да се заварят.</div>';
+    el.querySelectorAll("[data-wk]").forEach(c => c.addEventListener("change", () => {
+      a.welds[c.dataset.wk] = Object.assign({}, a.welds[c.dataset.wk], { on:c.checked }); asmChanged(false);
+    }));
+    el.querySelectorAll("[data-wl]").forEach(c => c.addEventListener("input", () => {
+      a.welds[c.dataset.wl] = Object.assign({}, a.welds[c.dataset.wl], { cm:Math.max(1, +c.value || 12) }); if(DZ.asmBind){ saveSoon(); renderLists(); } renderAsm3D();
+    }));
+  }
+  function bindAsm3D(){
+    const wrap = $("asm3dWrap"); if(!wrap) return;
+    const svg = wrap.querySelector("svg"); let drag = null;
+    svg.addEventListener("pointerdown", e => { drag = { x:e.clientX, y:e.clientY, yaw:DZ.view.yaw, pitch:DZ.view.pitch, moved:false, target:e.target }; svg.setPointerCapture(e.pointerId); });
+    svg.addEventListener("pointermove", e => {
+      if(!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      if(!drag.moved && Math.hypot(dx, dy) < 5) return; drag.moved = true;
+      DZ.view.yaw = drag.yaw + dx * 0.01; DZ.view.pitch = Math.max(-1.5, Math.min(1.5, drag.pitch + dy * 0.01)); renderAsm3D();
+    });
+    svg.addEventListener("pointerup", () => {
+      const d = drag; drag = null; if(!d || d.moved) return;
+      const f = d.target.closest && d.target.closest(".asmface");
+      DZ.asmSel = f ? f.dataset.iid : null;
+      renderAsm3D();
+      document.querySelectorAll("#asmItems .asmItem").forEach(r => r.classList.toggle("sel", r.dataset.iid === DZ.asmSel));
+      const row = f && document.querySelector('#asmItems .asmItem[data-iid="' + f.dataset.iid + '"]'); if(row) row.scrollIntoView({ block:"nearest", behavior:"smooth" });
+    });
+    wrap.parentElement.querySelectorAll("[data-aview]").forEach(b => b.addEventListener("click", () => {
+      DZ.view = ({ iso:{ yaw:-0.55, pitch:0.62 }, front:{ yaw:0, pitch:0.12 }, side:{ yaw:-1.5708, pitch:0.12 }, top:{ yaw:0, pitch:1.5 }, under:{ yaw:-0.55, pitch:-0.5 } })[b.dataset.aview];
+      renderAsm3D();
     }));
   }
 
