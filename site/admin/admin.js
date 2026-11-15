@@ -3,8 +3,8 @@
   const fmt = n => String(Math.round(n*10)/10);
 
   /* ---------- workshop settings ---------- */
-  const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr"];   // изпращач за Еконт (текст)
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", bd90:3, bd180:2, weldPerCm:1, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr","econtMode"];   // изпращач за Еконт (текст) + откъде е цената
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:1, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -73,7 +73,7 @@
     S = Object.assign({}, DEFAULTS, keep); saveSettings(); buildSettings(); recompute(); });
   // sender for Econt: typed once, kept with the settings (and in the cloud)
   function buildSender(){
-    [["snd-name","senderName"],["snd-phone","senderPhone"],["snd-city","senderCity"],["snd-addr","senderAddr"]].forEach(([id, k]) => {
+    [["snd-name","senderName"],["snd-phone","senderPhone"],["snd-city","senderCity"],["snd-addr","senderAddr"],["snd-mode","econtMode"]].forEach(([id, k]) => {
       const inp = $(id); if(!inp) return;
       if(document.activeElement !== inp) inp.value = S[k] || "";
       if(!inp.dataset.bound){ inp.dataset.bound = "1"; inp.addEventListener("input", () => { S[k] = inp.value; saveSettings(); }); }
@@ -1273,6 +1273,7 @@
       h += '<div class="muted" style="margin-top:10px">При потвърждение поръчката получава <b>' + esc(orderSerial(o.serial || ORD.next)) + '</b> и отива в „В обработка“. ' +
         'От склада се взема фира: <b>' + esc(idsTxt(c.used.map(x => x.id))) + '</b> · добавя се нова фира: <b>' + esc(idsTxt(c.created.map(x => x.id))) +
         '</b>. Номерата на новата фира са тези от чертежа — напишете ги върху парчетата.</div>' +
+        (o.delivery && o.delivery.type === "pickup" ? '' : econtBlock(o)) +
         '<div class="actions">' +
           '<button class="btn" id="bPrint" type="button">Печат</button>' +
           '<button class="btn cancel" id="bCancel" type="button">✕ Откажи поръчката</button>' +
@@ -1295,6 +1296,7 @@
     }
     h += '<div class="status" id="barStatus"></div>';
     el.innerHTML = h;
+    if(!(o.delivery && o.delivery.type === "pickup")) autoQuote(o);
     $("bPrint").addEventListener("click", () => window.print());
     if(!proc){
       $("bConfirm").addEventListener("click", confirmOrder);
@@ -1386,8 +1388,7 @@
         '<button class="btn" type="button" data-copy="' + esc(all) + '">Копирай всичко</button>' +
         '<a class="btn primary" href="' + ECONT_URL + '" target="_blank" rel="noopener noreferrer">Отвори Еконт → нова пратка</a>' +
       '</div>' +
-      (CLOUD ? '<div class="econtCalc"><button class="btn" type="button" id="b-econtCalc">Изчисли цена (Еконт)</button> ' +
-        '<span class="muted">само пита Еконт за цена — не създава пратка</span><div id="econtOut"></div></div>' : '') +
+      econtBlock(o) +
       '<div class="grid" style="margin-top:10px"><label>Номер на товарителницата<input type="text" id="b-waybill" value="' + esc(o.waybill || "") + '" placeholder="след като я създадете в Еконт"></label>' +
         '<div style="align-self:end"><a class="btn" id="b-track" href="' + trackUrl(o.waybill) + '" target="_blank" rel="noopener noreferrer"' + (o.waybill ? '' : ' hidden') + '>Проследи пратката</a></div></div>' +
       '</div>';
@@ -1409,19 +1410,48 @@
       paymentReceiverMethod:"cash",
     };
   }
+  /* the delivery price: Econt's tariff from the test account (until the own e-Econt login works) or the own login
+     (Настройки → Изпращач за Еконт). It is asked once per address/size and kept with the order. */
+  const econtDemo = () => S.econtMode !== "own";
+  // what the price depends on (not the names): when this changes, the price is asked again
+  function quoteKey(o){ const L = econtLabel(o); return hsh([L.senderAddress, L.receiverAddress, L.packCount, L.weight, L.shipmentDimensionsL, L.shipmentDimensionsW, L.shipmentDimensionsH, econtDemo()]); }
+  function quoteTxt(o){
+    const q = o.shipQuote;
+    if(!q) return '<span class="muted">още не е изчислена</span>';
+    const stale = q.key !== quoteKey(o);
+    return '<b>≈ ' + esc(eur2(+q.price)) + '</b> <span class="muted">· плаща получателят · ' + (q.demo ? 'тарифа на Еконт (тестов профил)' : 'моят профил в Еконт') + ' · ' + esc(fmtDT(q.at)) +
+      (stale ? ' · <b>адресът или размерите са променени — изчислете наново</b>' : '') + '</span>';
+  }
+  function econtBlock(o){
+    if(!CLOUD) return '';
+    return '<div class="econtCalc"><div><b>Доставка (Еконт):</b> <span id="econtQuote">' + quoteTxt(o) + '</span> ' +
+      '<button class="btn small" type="button" id="b-econtCalc">' + (o.shipQuote ? 'Изчисли наново' : 'Изчисли') + '</button></div><div id="econtOut"></div></div>';
+  }
+  // ask by itself when the order has a town and there is no (current) price — once the user stops typing
+  var QUOTING = new Set(), quoteTimer = null;
+  function autoQuote(o){
+    if(!CLOUD || !cloudReady || !o || !(o.delivery && o.delivery.city) || o.delivery.type === "pickup" || !S.senderCity) return;
+    if(o.shipQuote && o.shipQuote.key === quoteKey(o)) return;
+    clearTimeout(quoteTimer);
+    quoteTimer = setTimeout(() => { if(order === o && !QUOTING.has(o.id) && $("econtOut")) econtCalc(o); }, 1500);
+  }
   async function econtCalc(o, demo){
-    const out = $("econtOut"), btn = $("b-econtCalc");
+    if(demo === undefined) demo = econtDemo();
+    const out = $("econtOut"), btn = $("b-econtCalc"); if(!out || !btn) return;
     const missing = [!S.senderCity && "населено място на изпращача (Настройки)", !(o.delivery && o.delivery.city) && "населено място на получателя"].filter(Boolean);
     if(missing.length){ out.innerHTML = '<div class="warnbox">Липсва: ' + esc(missing.join(", ")) + '.</div>'; return; }
+    QUOTING.add(o.id);
     btn.disabled = true; btn.textContent = "Пита Еконт...";
-    const label = econtLabel(o);
+    const label = econtLabel(o), key = quoteKey(o);
     try{
       const res = await CLOUD.fn("econt", { action:"calculate", label, demo:!!demo });
       const L = res && res.econt && res.econt.label;
       if(res && res.ok && L && L.totalPrice != null){
-        out.innerHTML = '<div class="donebox">' + (demo ? 'Тестов профил на Еконт (само проверка на заявката): ' : 'Цена от Еконт: ') + '<b>' + esc(L.totalPrice) + ' ' + esc(L.currency || "") + '</b>' +
-          (L.receiverDueAmount != null ? ' · плаща получателят: ' + esc(L.receiverDueAmount) + ' ' + esc(L.currency || "") : '') +
-          ((o.delivery && o.delivery.type === "office") ? '<br><span class="muted">Сметнато до адрес в ' + esc(o.delivery.city) + ' — до офис обикновено е по-евтино.</span>' : '') + '</div>';
+        o.shipQuote = { price:+L.totalPrice, currency:L.currency || "EUR", receiver:L.receiverDueAmount != null ? +L.receiverDueAmount : null, at:new Date().toISOString(), demo:!!demo, key };
+        saveSoon(); renderLists();
+        const qe = $("econtQuote"); if(qe) qe.innerHTML = quoteTxt(o);
+        out.innerHTML = (demo ? '<div class="muted">Ориентировъчно — по тарифата на Еконт от тестовия им профил (без вашите отстъпки). Точната цена се вижда при създаване на пратката.</div>' : '') +
+          ((o.delivery && o.delivery.type === "office") ? '<div class="muted">Сметнато до адрес в ' + esc(o.delivery.city) + ' — до офис обикновено е по-евтино.</div>' : '');
       }else{
         const e = res && res.econt, msg = (e && (e.message || (e.innerErrors && e.innerErrors.map(x => x.message).join("; ")))) || (res && res.error) || ("HTTP " + (res && res.status));
         const lg = res && res.login, badLogin = /потребителско|парола|password|user/i.test(msg);
@@ -1436,7 +1466,7 @@
       out.innerHTML = '<div class="warnbox">' + esc(e.offline
         ? (navigator.onLine === false ? "Няма интернет." : "Функцията „econt“ в Supabase не отговаря — най-често още не е пусната или името ѝ не е точно econt (Supabase → Edge Functions).")
         : (e.message || "Грешка")) + '</div>';
-    }finally{ btn.disabled = false; btn.textContent = "Изчисли цена (Еконт)"; }
+    }finally{ QUOTING.delete(o.id); const b = $("b-econtCalc"); if(b){ b.disabled = false; b.textContent = o.shipQuote ? "Изчисли наново" : "Изчисли"; } }
   }
   $("bottomBar").addEventListener("click", e => {
     if(e.target.closest("#b-econtCalc") && order) econtCalc(order);
@@ -1576,7 +1606,7 @@
           '<td><input type="checkbox" data-wsel="' + esc(o.id) + '"' + (WSEL.has(o.id) ? " checked" : "") + ' title="за обединяване"></td>' +
           '<td><b>' + esc(o.name || "без име") + '</b>' + (o.serial ? ' <span class="muted">' + esc(orderSerial(o.serial)) + '</span>' : '') + '</td>' +
           '<td>' + esc(o.phone || "—") + '</td><td class="q">' + itemsTxt(o) + '</td>' +
-          '<td class="size">' + esc(eur2(clientPriceOf(o))) + '</td><td>' + esc(fmtDT(o.addedAt)) + '</td>' +
+          '<td class="size">' + esc(eur2(clientPriceOf(o))) + (o.shipQuote ? '<br><span class="muted">+ доставка ≈ ' + esc(eur2(+o.shipQuote.price)) + '</span>' : '') + '</td><td>' + esc(fmtDT(o.addedAt)) + '</td>' +
           '<td class="muted">' + esc(o.source || "ръчно") + '</td><td>' + openBtn(o.id, SEL.work === o.id) + '</td></tr>').join("") +
         '</tbody></table></div>' +
         (w.length > 1 ? '<div class="row mergeBar"><span class="muted">' + (WSEL.size > 1 ? 'Избрани: <b>' + WSEL.size + '</b>' :
@@ -1589,7 +1619,7 @@
           '<td class="size">' + esc(serTxt(o)) + '</td><td><b>' + esc(o.name || "без име") + '</b></td><td>' + esc(o.phone || "—") + '</td>' +
           '<td class="q">' + itemsTxt(o) + '</td><td class="size">' + esc(eur2(o.clientPrice != null ? o.clientPrice : clientPriceOf(o))) + '</td>' +
           '<td class="size">' + esc(eur2(o.price)) + '</td>' +
-          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + (o.waybill ? '<br><span class="muted">Еконт ' + esc(o.waybill) + '</span>' : '') + '</td>' +
+          '<td>' + esc(o.place || "—") + (o.deliveryDate ? ' · ' + esc(o.deliveryDate) : '') + (o.shipQuote ? '<br><span class="muted">Еконт ≈ ' + esc(eur2(+o.shipQuote.price)) + '</span>' : '') + (o.waybill ? '<br><span class="muted">Еконт ' + esc(o.waybill) + '</span>' : '') + '</td>' +
           '<td>' + esc(fmtDate(o.confirmedAt)) + '</td><td>' + openBtn(o.id, SEL.processing === o.id) + '</td></tr>').join("") +
         '</tbody></table></div>'
       : '<div class="empty">Няма поръчки в обработка. Поръчка идва тук, когато потвърдите разкроя ѝ в „Разкрой“.</div>';
