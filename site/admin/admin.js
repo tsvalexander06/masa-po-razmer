@@ -107,8 +107,8 @@
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
-    capEach: 3,         // € за тапичка на крак (4 на маса) — добавя се към цената, без надценка
-    markupPct: 100,     // надценка % (клиентска цена = формула × 2)
+    capEach: 3,         // € за тапичка на крак (4 на маса)
+    markupPct: 80,      // надценка % върху целия труд и материалите (клиентска цена = себестойност × 1.8)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
@@ -131,7 +131,7 @@
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=pp.base*m+pp.caps;
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m;
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     return { total, currency:"€", lines };
   }
@@ -1022,18 +1022,20 @@
     const nTables = o.tables.reduce((a, t) => a + t.qty, 0), nParts = parts.reduce((a, r) => a + r.p.qty, 0);
 
     /* ---- price of the order ----
-       Our cost: whole sheets actually needed (offcuts are free) + tube sticks.
-       Welds + bends are our labour. Client price (quote) is the shared formula. */
-    const sheetCostOurs = allSheets.reduce((a, sh) => a + (sh.type.offcut ? 0 : (+sh.type.price || 0)), 0);
-    const tubeCostOurs = bars.bars.length * (+S.tubePrice || 0);
-    let weldOurs = 0, bendOurs = 0;
-    o.tables.forEach(t => { const p = priceParts(t); weldOurs += p.weld * t.qty; bendOurs += p.bend * t.qty; });
-    parts.forEach(r => { bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
+       Cost (себестойност) = materials + labour, from the same formula as the client price:
+         materials: sheet by the area of the blanks (€/м²), tube by length, leg caps; labour: welds + bends.
+       Client price = cost × (1 + 80%) → the profit is always 80% of the cost.
+       The whole sheets to buy are shown apart: what is left of them goes to the offcut store. */
+    let matOurs = 0, tubeOurs = 0, weldOurs = 0, bendOurs = 0, capsOurs = 0;
+    o.tables.forEach(t => { const pp = priceParts(t), q = t.qty;
+      matOurs += pp.mat * q; tubeOurs += pp.tube * q; weldOurs += pp.weld * q; bendOurs += pp.bend * q; capsOurs += pp.caps * q; });
+    parts.forEach(r => { matOurs += Math.max(0, r.g.area) / 1e6 * PRICE.sheetM2 * (r.p.th / 1.5) * r.p.qty; bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
     (o.assemblies || []).forEach(a => { weldOurs += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
-    const costMaterials = sheetCostOurs + tubeCostOurs;
-    const capsOurs = o.tables.reduce((a, t) => a + priceParts(t).caps * t.qty, 0);   // тапички на краката
+    const costMaterials = matOurs + tubeOurs;
     const costTotal = costMaterials + weldOurs + bendOurs + capsOurs;
-    PRICING = { client:orderClientPrice(o), costMaterials, weld:weldOurs, bend:bendOurs, caps:capsOurs, costTotal };
+    const buySheets = allSheets.reduce((a, sh) => a + (+sh.type.price || 0), 0), buyTube = bars.bars.length * (+S.tubePrice || 0);
+    PRICING = { client:orderClientPrice(o), costMaterials, weld:weldOurs, bend:bendOurs, caps:capsOurs, costTotal,
+                buy:buySheets + buyTube, buySheets:allSheets.length, buyBars:bars.bars.length };
 
     // head: who and what
     const cr = fmtDT(o.created);
@@ -1257,13 +1259,15 @@
     let h = '<h2>' + (proc ? 'Цена, доставка и архивиране' : 'Цена и потвърждение') + '</h2>' +
       '<div class="pricebox procbox">' +
         '<div class="big"><span>Цена за клиента</span><b>' + esc(eur2(P.client)) + '</b></div>' +
-        '<div><span>Себестойност материали</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
-        '<div><span>Заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
-        '<div><span>Огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
+        '<div><span>Материали (лист по площ + тръба)</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
         '<div><span>Тапички на краката</span><b>' + esc(eur2(P.caps)) + '</b></div>' +
+        '<div><span>Труд: заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
+        '<div><span>Труд: огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
         '<div><span>Себестойност общо</span><b>' + esc(eur2(P.costTotal)) + '</b></div>' +
-        '<div><span>Разлика (цена − себестойност)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
-      '</div>';
+        '<div><span>Печалба (' + PRICE.markupPct + '% надценка)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
+      '</div>' +
+      (P.buy != null ? '<div class="muted" style="margin-top:6px">За купуване: ' + P.buySheets + (P.buySheets === 1 ? ' нов лист' : ' нови листа') +
+        (P.buyBars ? ' + ' + P.buyBars + (P.buyBars === 1 ? ' прът' : ' пръта') + ' тръба' : '') + ' = <b>' + esc(eur2(P.buy)) + '</b> (цели листове — остатъкът им отива във фирата; не е себестойност на поръчката).</div>' : '');
     if(!proc){
       const c = CURRENT || { used:[], created:[] };
       h += '<div class="muted" style="margin-top:10px">При потвърждение поръчката получава <b>' + esc(orderSerial(o.serial || ORD.next)) + '</b> и отива в „В обработка“. ' +

@@ -640,8 +640,8 @@
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
     bend: 0.5,          // € за огъване (90°)
-    capEach: 3,         // € за тапичка на крак (4 на маса) — добавя се към цената, без надценка
-    markupPct: 100,     // надценка % (клиентска цена = формула × 2)
+    capEach: 3,         // € за тапичка на крак (4 на маса)
+    markupPct: 80,      // надценка % върху целия труд и материалите (клиентска цена = себестойност × 1.8)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
@@ -664,7 +664,7 @@
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=pp.base*m+pp.caps;
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m;
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     return { total, currency:"€", lines };
   }
