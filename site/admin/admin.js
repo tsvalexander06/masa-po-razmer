@@ -1409,22 +1409,26 @@
       paymentReceiverMethod:"cash",
     };
   }
-  async function econtCalc(o){
+  async function econtCalc(o, demo){
     const out = $("econtOut"), btn = $("b-econtCalc");
     const missing = [!S.senderCity && "населено място на изпращача (Настройки)", !(o.delivery && o.delivery.city) && "населено място на получателя"].filter(Boolean);
     if(missing.length){ out.innerHTML = '<div class="warnbox">Липсва: ' + esc(missing.join(", ")) + '.</div>'; return; }
     btn.disabled = true; btn.textContent = "Пита Еконт...";
     const label = econtLabel(o);
     try{
-      const res = await CLOUD.fn("econt", { action:"calculate", label });
+      const res = await CLOUD.fn("econt", { action:"calculate", label, demo:!!demo });
       const L = res && res.econt && res.econt.label;
       if(res && res.ok && L && L.totalPrice != null){
-        out.innerHTML = '<div class="donebox">Цена от Еконт: <b>' + esc(L.totalPrice) + ' ' + esc(L.currency || "") + '</b>' +
+        out.innerHTML = '<div class="donebox">' + (demo ? 'Тестов профил на Еконт (само проверка на заявката): ' : 'Цена от Еконт: ') + '<b>' + esc(L.totalPrice) + ' ' + esc(L.currency || "") + '</b>' +
           (L.receiverDueAmount != null ? ' · плаща получателят: ' + esc(L.receiverDueAmount) + ' ' + esc(L.currency || "") : '') +
           ((o.delivery && o.delivery.type === "office") ? '<br><span class="muted">Сметнато до адрес в ' + esc(o.delivery.city) + ' — до офис обикновено е по-евтино.</span>' : '') + '</div>';
       }else{
         const e = res && res.econt, msg = (e && (e.message || (e.innerErrors && e.innerErrors.map(x => x.message).join("; ")))) || (res && res.error) || ("HTTP " + (res && res.status));
-        out.innerHTML = '<div class="warnbox">Еконт не върна цена: ' + esc(msg) + '</div>';
+        const lg = res && res.login, badLogin = /потребителско|парола|password|user/i.test(msg);
+        out.innerHTML = '<div class="warnbox">' + (demo ? 'Тестовият профил на Еконт' : 'Еконт') + ' не върна цена: ' + esc(msg) + '</div>' +
+          (lg ? '<div class="muted" style="margin-top:6px">Пробвано с потребител <b>' + esc(lg.user) + '</b> (' + lg.userLength + ' знака) и парола от <b>' + lg.passLength + '</b> знака · ' + esc(lg.server) + '</div>' : '') +
+          (badLogin && !demo ? '<div class="note" style="margin-top:6px">Проверете в Supabase → Edge Functions → Secrets: ECONT_USER е потребителското име за e-Econt (вижте го в профила си в e-Econt — може да не е имейлът), ECONT_PASS е паролата (ако влизате с Google, задайте си парола в e-Econt). ' +
+            '<button class="btn small" type="button" id="b-econtDemo">Пробвай с тестовия профил на Еконт</button> — ако там излезе цена, заявката е наред и остава само входът.</div>' : '');
       }
       out.innerHTML += '<details class="muted"><summary>Подробности (за проверка)</summary><pre class="econtRaw">' + esc(JSON.stringify({ sent:label, answer:res }, null, 1).slice(0, 6000)) + '</pre></details>';
     }catch(e){
@@ -1434,7 +1438,10 @@
         : (e.message || "Грешка")) + '</div>';
     }finally{ btn.disabled = false; btn.textContent = "Изчисли цена (Еконт)"; }
   }
-  $("bottomBar").addEventListener("click", e => { if(e.target.closest("#b-econtCalc") && order) econtCalc(order); });
+  $("bottomBar").addEventListener("click", e => {
+    if(e.target.closest("#b-econtCalc") && order) econtCalc(order);
+    if(e.target.closest("#b-econtDemo") && order) econtCalc(order, true);
+  });
 
   // copy buttons (anywhere in the bottom bar)
   async function copyText(txt){

@@ -25,15 +25,20 @@ Deno.serve(async (req) => {
   }).catch(() => null);
   if (!chk || !chk.ok || (await chk.json().catch(() => false)) !== true) return json({ error: "Нямате достъп." }, 403);
 
-  // 2. the Econt login
-  const user = Deno.env.get("ECONT_USER"), pass = Deno.env.get("ECONT_PASS");
-  if (!user || !pass) return json({ error: "Липсват ECONT_USER и ECONT_PASS в Supabase → Edge Functions → Secrets." }, 500);
-  const base = (Deno.env.get("ECONT_BASE") ?? "https://ee.econt.com/services").replace(/\/+$/, "");
-
   // 3. price only — the mode is fixed here, whatever the page sends
-  let body: { action?: string; label?: unknown };
+  let body: { action?: string; label?: unknown; demo?: boolean };
   try { body = await req.json(); } catch { return json({ error: "Невалидна заявка." }, 400); }
   if (body.action !== "calculate") return json({ error: "Позволено е само изчисляване на цена." }, 400);
+
+  // 2. the Econt login (spaces / new lines around a pasted secret are removed).
+  //    demo: Econt's public test account on its test server — to check the request without the real login.
+  let user = (Deno.env.get("ECONT_USER") ?? "").trim(), pass = (Deno.env.get("ECONT_PASS") ?? "").replace(/^[\s\u200b\ufeff]+|[\s\u200b\ufeff]+$/g, "");
+  let base = (Deno.env.get("ECONT_BASE") ?? "https://ee.econt.com/services").replace(/\/+$/, "");
+  if (body.demo === true) { user = "iasp-dev"; pass = "1Asp-dev"; base = "https://demo.econt.com/ee/services"; }
+  if (!user || !pass) return json({ error: "Липсват ECONT_USER и ECONT_PASS в Supabase → Edge Functions → Secrets." }, 500);
+  // what was tried, without giving the secret away: the user name half-hidden, only the length of the password
+  const login = { user: user.length > 6 ? user.slice(0, 3) + "…" + user.slice(-3) : user.slice(0, 1) + "…", userLength: user.length, passLength: pass.length,
+    server: body.demo === true ? "demo (тестов профил на Еконт)" : base };
 
   let r: Response;
   try {
@@ -48,5 +53,5 @@ Deno.serve(async (req) => {
   const text = await r.text();
   let econt: unknown;
   try { econt = JSON.parse(text); } catch { econt = { raw: text.slice(0, 2000) }; }
-  return json({ ok: r.ok, status: r.status, econt });
+  return json({ ok: r.ok, status: r.status, econt, login });
 });
