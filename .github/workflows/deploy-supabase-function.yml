@@ -37,6 +37,7 @@ jobs:
           REF="$(grep -oE 'https://[a-z0-9-]+\.supabase\.co' site/admin/cloud-config.js | head -1 | sed -E 's#https://([a-z0-9-]+)\.supabase\.co#\1#')"
           echo "Project: $REF"
           # the CLI from npm (looking up the newest GitHub release can hit GitHub's rate limit)
-          npx --yes supabase@latest --version
-          npx --yes supabase@latest functions deploy econt --project-ref "$REF" --no-verify-jwt --use-api
-          npx --yes supabase@latest functions list --project-ref "$REF"
+          SB="npx --yes supabase@3.1.0"
+          $SB --version
+          $SB functions deploy econt --project-ref "$REF" --no-verify-jwt --use-api --yes
+          $SB functions list --project-ref "$REF"
