@@ -21,10 +21,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Supabase CLI
-        uses: supabase/setup-cli@v1
+      - name: Node (for the Supabase CLI from npm)
+        uses: actions/setup-node@v4
         with:
-          version: latest
+          node-version: 20
 
       - name: Deploy econt
         env:
@@ -36,5 +36,7 @@ jobs:
           fi
           REF="$(grep -oE 'https://[a-z0-9-]+\.supabase\.co' site/admin/cloud-config.js | head -1 | sed -E 's#https://([a-z0-9-]+)\.supabase\.co#\1#')"
           echo "Project: $REF"
-          supabase functions deploy econt --project-ref "$REF" --no-verify-jwt --use-api
-          supabase functions list --project-ref "$REF"
+          # the CLI from npm (looking up the newest GitHub release can hit GitHub's rate limit)
+          npx --yes supabase@latest --version
+          npx --yes supabase@latest functions deploy econt --project-ref "$REF" --no-verify-jwt --use-api
+          npx --yes supabase@latest functions list --project-ref "$REF"
