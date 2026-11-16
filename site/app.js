@@ -24,7 +24,6 @@
 
     <h3>Чертеж (3D изглед)</h3>
     <svg class="bp draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"></svg>
-    <p class="hint" style="margin:8px 0 2px">Размерите са в милиметри. Чертежът се мащабира спрямо въведените размери.</p>
 
     <h3>Размери и опции</h3>
     <div class="row">
@@ -40,17 +39,6 @@
     <label>Височина <span class="hint">(мм)</span></label>
     <input type="number" class="f-H" value="850" min="400" max="1200" step="10">
 
-    <div class="row">
-      <div>
-        <label>Дебелина на ламарината</label>
-        <p class="info">Ламарината е с дебелина <b>1.5 мм</b>.</p>
-      </div>
-      <div>
-        <label>Размер на профила на крака</label>
-        <p class="info">Профилът на краката е <b>30 × 30 мм</b>.</p>
-      </div>
-    </div>
-
     <label class="toggle"><input type="checkbox" class="f-splashOn" checked> С борд (кант отзад)</label>
     <div class="sub f-splashBox">
       <label>Височина на борда <span class="hint">(мм)</span></label>
@@ -59,7 +47,6 @@
       <div class="row">
         <div><span class="hint">Посока</span><select class="f-hemDir">
           <option value="wall" selected>Към стената</option>
-          <option value="front">Напред (към плота)</option>
           <option value="none">Без подгъвка</option>
         </select></div>
         <div class="f-hemSizeBox"><span class="hint">Размер (мм, 10–60)</span><input type="number" class="f-hem" value="20" min="10" max="60" step="1"></div>
@@ -72,16 +59,16 @@
       <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
     </div>
 
-    <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долна основа (плот)</label>
+    <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долен плот</label>
     <div class="sub f-baseBox">
-      <label>Разстояние от пода до основата <span class="hint">(мм)</span></label>
+      <label>Разстояние от пода до долния плот <span class="hint">(мм)</span></label>
       <input type="number" class="f-baseH" value="150" min="20" max="600" step="10">
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-midOn"> Втори междинен плот</label>
     <div class="sub f-midBox">
-      <p class="hint">Вторият междинен плот се поставя автоматично <b>по средата между долната основа (плот) и горния работен плот</b>. <span class="f-mid2info"></span></p>
-      <p class="hint" style="margin-top:6px">Тази опция включва и долната основа (плот) — задайте нейната височина по-горе.</p>
+      <p class="hint">Вторият междинен плот се поставя автоматично <b>по средата между долния плот и горния работен плот</b>. <span class="f-mid2info"></span></p>
+      <p class="hint" style="margin-top:6px">Тази опция включва и долния плот — задайте неговата височина по-горе.</p>
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-advOn"> Допълнителни настройки</label>
@@ -90,13 +77,13 @@
       <label>Челно лице (височина на канта)</label>
       <div class="row3">
         <div><span class="hint">Работен плот</span><select class="f-topEdge"><option value="20">20 мм</option><option value="30" selected>30 мм</option><option value="40">40 мм</option><option value="50">50 мм</option><option value="60">60 мм</option></select></div>
-        <div class="f-advBase"><span class="hint">Долна основа</span><select class="f-baseEdge"><option value="20" selected>20 мм</option><option value="30">30 мм</option><option value="40">40 мм</option><option value="50">50 мм</option><option value="60">60 мм</option></select></div>
+        <div class="f-advBase"><span class="hint">Долен плот</span><select class="f-baseEdge"><option value="20" selected>20 мм</option><option value="30">30 мм</option><option value="40">40 мм</option><option value="50">50 мм</option><option value="60">60 мм</option></select></div>
         <div class="f-advMid"><span class="hint">Втори междинен плот</span><select class="f-midEdge"><option value="20" selected>20 мм</option><option value="30">30 мм</option><option value="40">40 мм</option><option value="50">50 мм</option><option value="60">60 мм</option></select></div>
       </div>
       <label>Сгъвка отдолу навътре <span class="hint">(мм, от 12 до 30)</span></label>
       <div class="row3">
         <div><span class="hint">Работен плот</span><input type="number" class="f-topRet" value="12" min="12" max="30" step="1"></div>
-        <div class="f-advBase"><span class="hint">Долна основа</span><input type="number" class="f-baseRet" value="12" min="12" max="30" step="1"></div>
+        <div class="f-advBase"><span class="hint">Долен плот</span><input type="number" class="f-baseRet" value="12" min="12" max="30" step="1"></div>
         <div class="f-advMid"><span class="hint">Втори междинен плот</span><input type="number" class="f-midRet" value="12" min="12" max="30" step="1"></div>
       </div>
       <label>Разстояние от предните до задните крака <span class="hint">(мм, външно; празно = стандартно)</span></label>
@@ -114,6 +101,17 @@
 
     <label>Бележки <span class="hint">(по избор)</span></label>
     <textarea class="f-notes" placeholder="напр. отвор за мивка, усилена конструкция, инокс 304..."></textarea>
+
+    <div class="row">
+      <div>
+        <label>Дебелина на ламарината</label>
+        <p class="info">Ламарината е с дебелина <b>1.5 мм</b>.</p>
+      </div>
+      <div>
+        <label>Размер на профила на крака</label>
+        <p class="info">Профилът на краката е <b>30 × 30 мм</b>.</p>
+      </div>
+    </div>
   `;
 
   function createTable(){
@@ -185,8 +183,8 @@
   function tableSpecAdvanced(v){
     if(!v.advOn) return "";
     const g = tableGeo(v, PRICE);
-    let s = "Челно лице: работен плот "+g.eT+" мм"+(v.baseOn?", долна основа "+g.eB+" мм":"")+(v.midOn?", втори междинен плот "+g.eM+" мм":"")+"\n";
-    s += "Сгъвка навътре: работен плот "+g.rT+" мм"+(v.baseOn?", долна основа "+g.rB+" мм":"")+(v.midOn?", втори междинен плот "+g.rM+" мм":"")+"\n";
+    let s = "Челно лице: работен плот "+g.eT+" мм"+(v.baseOn?", долен плот "+g.eB+" мм":"")+(v.midOn?", втори междинен плот "+g.eM+" мм":"")+"\n";
+    s += "Сгъвка навътре: работен плот "+g.rT+" мм"+(v.baseOn?", долен плот "+g.rB+" мм":"")+(v.midOn?", втори междинен плот "+g.rM+" мм":"")+"\n";
     if(v.legSpan) s += "Разстояние между предните и задните крака (външно): "+v.legSpan+" мм\n";
     const legs = LEG_KEYS.map((k,i) => v[k] ? LEG_NAMES[i]+" "+v[k]+" мм" : "").filter(Boolean);
     if(legs.length) s += "Височина на краката: "+legs.join(", ")+" (останалите "+g.legAuto+" мм)\n";
@@ -236,7 +234,7 @@
     const legProfile=v.legProfile||30;
 
     const w=realL/1000, d=g.Dp/1000, h=realH/1000, zD=-g.hemIn/1000;   // zD: задният край на общата дълбочина
-    const tt=Math.max(0.015,(g.eT+10)/1000), lg=legProfile/1000, st=0.03;
+    const tt=Math.max(0.015,(g.eT+10)/1000), lg=legProfile/1000;
     const thB=Math.max(0.012,(g.eB+10)/1000), thM=Math.max(0.012,(g.eM+10)/1000);
     const legH=h-tt;
 
@@ -274,10 +272,9 @@
 
     leg(0,lxL,frontZ); leg(1,lxR,frontZ);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
-    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, toFront=g.hemDir==="front";
-      if(hm>0 && !toFront) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
-      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT);
-      if(hm>0 && toFront) box(0,h+bs-0.006,st,w,0.006,hm,TOP,FRONT,RIGHT); }    // подгъвка горе, напред
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, sh=0.006;
+      if(hm>0) box(0,h,g.hemDir==="front"?0:-hm,w,bs,hm+sh,TOP,FRONT,RIGHT);   // борд с подгъвка горе (към стената; „напред“ — само при стари поръчки)
+      else box(0,h,0,w,bs,sh,TOP,FRONT,RIGHT); }                              // без подгъвка: само ламарината нагоре
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
@@ -344,8 +341,8 @@
     if(v.splashOn) s+="Подгъвка на борда: "+(v.hemDir==="wall" ? v.hem+" мм към стената (включена в дълбочината "+v.D+" мм; плот "+(v.D-v.hem)+" мм)"
                                           : v.hemDir==="front" ? v.hem+" мм напред" : "НЕ")+"\n";
     if(!v.splashOn) s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
-    s+="Долна основа (плот): "+(v.baseOn?"ДА (на "+v.baseH+" мм от пода)":"НЕ")+"\n";
-    s+="Втори междинен плот: "+(v.midOn?"ДА (по средата между основата и работния плот, ≈ "+v.mid2H+" мм от пода)":"НЕ")+"\n";
+    s+="Долен плот: "+(v.baseOn?"ДА (на "+v.baseH+" мм от пода)":"НЕ")+"\n";
+    s+="Втори междинен плот: "+(v.midOn?"ДА (по средата между долния и работния плот, ≈ "+v.mid2H+" мм от пода)":"НЕ")+"\n";
     s+=tableSpecAdvanced(v);
     if(v.notes) s+="Бележки:    "+v.notes+"\n";
     return s;
@@ -380,7 +377,6 @@
       { const g = tableGeo(v, PRICE);
         t.card.querySelector('.f-hemInfo').textContent = v.hemDir==="wall"
           ? "Общата дълбочина "+v.D+" мм е до стената и включва подгъвката: плот "+g.Dp+" мм + подгъвка "+v.hem+" мм."
-          : v.hemDir==="front" ? "Подгъвката "+v.hem+" мм е напред, над плота — дълбочината на плота е "+v.D+" мм."
           : "Без подгъвка — дълбочината на плота е "+v.D+" мм."; }
       t.card.querySelector('.f-legBackBox').style.display = (v.splashOn || v.legSpan) ? "none" : "block";
       renderAdvanced(t, v);

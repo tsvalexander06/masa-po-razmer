@@ -526,7 +526,7 @@
     const legProfile=v.legProfile||30;
 
     const w=realL/1000, d=g.Dp/1000, h=realH/1000, zD=-g.hemIn/1000;   // zD: задният край на общата дълбочина
-    const tt=Math.max(0.015,(g.eT+10)/1000), lg=legProfile/1000, st=0.03;
+    const tt=Math.max(0.015,(g.eT+10)/1000), lg=legProfile/1000;
     const thB=Math.max(0.012,(g.eB+10)/1000), thM=Math.max(0.012,(g.eM+10)/1000);
     const legH=h-tt;
 
@@ -564,10 +564,9 @@
 
     leg(0,lxL,frontZ); leg(1,lxR,frontZ);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
-    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, toFront=g.hemDir==="front";
-      if(hm>0 && !toFront) box(0,h+bs-0.006,-hm,w,0.006,hm,TOP,FRONT,RIGHT);   // подгъвка горе, назад към стената
-      box(0,h,0,w,bs,st,TOP,FRONT,RIGHT);
-      if(hm>0 && toFront) box(0,h+bs-0.006,st,w,0.006,hm,TOP,FRONT,RIGHT); }    // подгъвка горе, напред
+    if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, sh=0.006;
+      if(hm>0) box(0,h,g.hemDir==="front"?0:-hm,w,bs,hm+sh,TOP,FRONT,RIGHT);   // борд с подгъвка горе (към стената; „напред“ — само при стари поръчки)
+      else box(0,h,0,w,bs,sh,TOP,FRONT,RIGHT); }                              // без подгъвка: само ламарината нагоре
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
