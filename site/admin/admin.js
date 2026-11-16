@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr","econtMode"];   // изпращач за Еконт (текст) + откъде е цената
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:1, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:0.5, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -56,7 +56,14 @@
       s.v = 3;
       try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
     }
+    if(migrateSettings(s)) try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
     return s;
+  }
+  // v4: welds half the price (1 → 0.5 €/см for the designer's assemblies; the tables' weld is in PRICE)
+  function migrateSettings(s){
+    if(+s.v >= 4) return false;
+    if(+s.weldPerCm === 1) s.weldPerCm = 0.5;
+    s.v = 4; return true;
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} cloudDirty(); }
   function buildSettings(){
@@ -105,10 +112,10 @@
   const PRICE = {
     sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
-    weldPerFloor: 48,   // € за етаж (плот): 12 см × 4 крака × 1€/см
+    weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
     bend: 0.5,          // € за огъване (90°)
     capEach: 3,         // € за тапичка на крак (4 на маса)
-    markupPct: 80,      // надценка % върху целия труд и материалите (клиентска цена = себестойност × 1.8)
+    markupPct: 50,      // надценка % върху целия труд и материалите (клиентска цена = себестойност × 1.5)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
@@ -1023,7 +1030,7 @@
     /* ---- price of the order ----
        Cost (себестойност) = materials + labour, from the same formula as the client price:
          materials: sheet by the area of the blanks (€/м²), tube by length, leg caps; labour: welds + bends.
-       Client price = cost × (1 + 80%) → the profit is always 80% of the cost.
+       Client price = cost × (1 + markupPct) → the profit is always markupPct of the cost.
        The whole sheets to buy are shown apart: what is left of them goes to the offcut store. */
     let matOurs = 0, tubeOurs = 0, weldOurs = 0, bendOurs = 0, capsOurs = 0;
     o.tables.forEach(t => { const pp = priceParts(t), q = t.qty;
@@ -1771,7 +1778,7 @@
     kv:{ table:"kv", rows:() => [{ id:"settings", data:S }, { id:"invDone", data:INV.done }, { id:"partsLib", data:LIB }],
       apply:(takes) => {
         takes.forEach(r => {
-          if(r.id === "settings"){ S = Object.assign({}, DEFAULTS, r.data || {}); saveSettingsLocal(); }
+          if(r.id === "settings"){ S = Object.assign({}, DEFAULTS, r.data || {}); if(migrateSettings(S)) setTimeout(saveSettings, 0); else saveSettingsLocal(); }
           if(r.id === "invDone"){ INV.done = r.data || {}; saveInvLocal(); }
           if(r.id === "partsLib"){ LIB = { items:((r.data && r.data.items) || []).map(normPart), assemblies:((r.data && r.data.assemblies) || []).map(x => normAsm(x)) }; try{ localStorage.setItem(LIB_KEY, JSON.stringify(LIB)); }catch(e){} } }); } },
   };
