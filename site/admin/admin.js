@@ -113,9 +113,9 @@
     sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
-    bend: 0.5,          // € за огъване (90°)
+    bend: 1,            // € за огъване (90°)
     capEach: 3,         // € за тапичка на крак (4 на маса)
-    markupPct: 50,      // надценка % върху целия труд и материалите (клиентска цена = себестойност × 1.5)
+    markupPct: 100,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
