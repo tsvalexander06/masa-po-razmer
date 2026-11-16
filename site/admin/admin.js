@@ -2848,155 +2848,250 @@
 
 
   /* ---------- Палети: тегло, габарит и подреждане на поръчките за транспорт ----------
-     Всяка маса / детайл / елемент е кутия (габарит + тегло). По-малките влизат в по-големите маси —
-     между краката, над най-горния долен плот и под челната дъска на плота (или между основата и
-     междинния плот). Останалото се подрежда на палети (стандартни или „по размер“, ако масата е по-дълга),
-     с макс. височина и тегло; еднаквите плоски детайли се редят на купчина. */
-  const PAL_DEFAULTS = { palAL:1200, palAW:800, palBL:1200, palBW:1000, palH:144, palKg:25, palMaxH:1800, palMaxKg:1000, palOver:0 };
+     Всяка маса е описана с истинските си части (плот с челните дъски, крака, долни плотове, борд), а
+     детайлите и елементите — с габарита си. Програмата пробва всяка маса изправена, с краката нагоре и
+     легнала на страна, на всяко място на палета: до другите, вътре в тях (между краката, над долния плот)
+     или само отчасти вътре (напр. два крака в друга маса), или отгоре — докато нищо не се застъпва,
+     стои стабилно и се събира във височината и теглото. Целта е възможно най-малко палети. */
+  const PAL_DEFAULTS = { palAL:1200, palAW:800, palBL:1200, palBW:1000, palH:144, palKg:25, palMaxH:1800, palMaxKg:1000, palOver:0, palCustW:1200, palGap:10 };
   const palS = k => (S[k] != null && S[k] !== "" ? +S[k] : PAL_DEFAULTS[k]);
   const ordTag = o => o.serial ? "№" + String(o.serial).padStart(4, "0") : ((o.name || "без име").split(" ")[0]);
-  const vol = u => u.L * u.D * u.H;
-  // the free spaces inside a table: between the legs, from a shelf (or the floor) up to the next shelf / the top's board
-  function tableCavities(t, g){
-    const prof = t.legProfile || 30, cw = g.shL - 2 * prof, cd = g.span - 2 * prof;
-    if(cw <= 0 || cd <= 0) return [];
-    const topUnder = t.H - (t.thickness || 1.5) - g.eT, baseTop = t.baseOn ? t.baseH : 0, out = [];
-    if(t.midOn){ out.push({ z:baseTop, h:(mid2H(t) - g.eM) - baseTop }); out.push({ z:mid2H(t), h:topUnder - mid2H(t) }); }
-    else out.push({ z:baseTop, h:topUnder - baseTop });
-    return out.filter(c => c.h > 40).map(c => Object.assign(c, { w:cw, d:cd, x0:g.side + prof, y0:g.front + prof,
-      sheet:newSheet({ W:Math.max(cw, cd), H:Math.min(cw, cd) }, 0), swap:cw < cd }));
-  }
-  // a table drawn as its parts (top with its boards, legs, shelves, борд) — so what is inside it can be seen
+  // a table as its parts, in its own frame (x along the length, y from the front, z up from the floor)
   function tableComp(t, g){
     const prof = t.legProfile || 30, out = [], topZ = t.H, eT = Math.max(g.eT, 8);
-    out.push({ x:0, y:0, z:topZ - eT, dx:t.L, dy:g.Dp, dz:eT });
-    if(t.splashOn) out.push({ x:0, y:Math.max(0, g.Dp - 3), z:topZ, dx:t.L, dy:3 + g.hemIn, dz:+t.splashH || 0 });
+    out.push({ x:0, y:0, z:topZ - eT, dx:t.L, dy:g.Dp, dz:eT, role:"top" });
+    if(t.splashOn) out.push({ x:0, y:Math.max(0, g.Dp - 3), z:topZ, dx:t.L, dy:3 + g.hemIn, dz:+t.splashH || 0, role:"top" });
     const xs = [g.side, t.L - g.side - prof], ys = [g.front, g.front + g.span - prof];
-    xs.forEach(x => ys.forEach(y => out.push({ x, y, z:0, dx:prof, dy:prof, dz:topZ - eT })));
-    const shelf = (at, e) => out.push({ x:g.side, y:g.front, z:at - Math.max(e, 6), dx:g.shL, dy:g.shD, dz:Math.max(e, 6) });
+    xs.forEach(x => ys.forEach(y => out.push({ x, y, z:0, dx:prof, dy:prof, dz:topZ - eT, role:"leg" })));
+    const shelf = (at, e) => out.push({ x:g.side, y:g.front, z:at - Math.max(e, 6), dx:g.shL, dy:g.shD, dz:Math.max(e, 6), role:"shelf" });
     if(t.baseOn) shelf(t.baseH, g.eB);
     if(t.midOn) shelf(mid2H(t), g.eM);
     return out;
   }
+  // the ways a piece may lie: quarter turns around X, Y, Z (see rotQ)
+  const TABLE_POSES = [[[0,0,0],"изправена"],[[0,0,1],"изправена"],[[2,0,0],"с краката нагоре"],[[2,0,1],"с краката нагоре"],
+    [[1,0,0],"легната на страна"],[[3,0,0],"легната на страна"],[[1,0,1],"легната на страна"],[[3,0,1],"легната на страна"]];
+  const PIECE_POSES = [[[0,0,0],"легнал"],[[0,0,1],"легнал"],[[1,0,0],"на ръб"],[[1,0,1],"на ръб"],[[0,1,0],"на ръб"],[[0,1,1],"на ръб"]];
+  function posed(comps, r){
+    const out = comps.map(c => { const a = rotQ([c.x, c.y, c.z], r), b = rotQ([c.x + c.dx, c.y + c.dy, c.z + c.dz], r);
+      return { x:Math.min(a[0], b[0]), y:Math.min(a[1], b[1]), z:Math.min(a[2], b[2]), dx:Math.abs(a[0] - b[0]), dy:Math.abs(a[1] - b[1]), dz:Math.abs(a[2] - b[2]), role:c.role }; });
+    const mn = ["x", "y", "z"].map(k => Math.min(...out.map(c => c[k])));
+    out.forEach(c => { c.x = Math.round((c.x - mn[0]) * 10) / 10; c.y = Math.round((c.y - mn[1]) * 10) / 10; c.z = Math.round((c.z - mn[2]) * 10) / 10; });
+    return { comps:out, dx:Math.max(...out.map(c => c.x + c.dx)), dy:Math.max(...out.map(c => c.y + c.dy)), dz:Math.max(...out.map(c => c.z + c.dz)) };
+  }
+  function makeUnit(base, comps, table){
+    const seen = new Set(), poses = [];
+    (table ? TABLE_POSES : PIECE_POSES).forEach(([r, how], idx) => {
+      const p = posed(comps, r), key = JSON.stringify(p.comps.map(c => [c.x, c.y, c.z, c.dx, c.dy, c.dz]).sort());
+      if(seen.has(key)) return; seen.add(key);
+      // nothing tall and thin standing up (a table standing on its legs is fine)
+      if(idx > 1 && p.dz > 2 * Math.min(p.dx, p.dy) + 1) return;
+      poses.push(Object.assign(p, { how, idx }));
+    });
+    const p0 = poses[0];
+    return Object.assign(base, { comps, poses, L:p0.dx, D:p0.dy, H:p0.dz });
+  }
   function palletUnits(orders){
-    const units = [], kgPerM = (30 * 30 - Math.pow(Math.max(0, 30 - 2 * S.tubeWall), 2)) * 0.00793;
+    const units = [], kgPerM = (30 * 30 - Math.pow(Math.max(0, 30 - 2 * S.tubeWall), 2)) * 0.00793, room = Math.min(300, palS("palMaxH") - palS("palH"));
     orders.forEach(o => {
       const tag = ordTag(o);
       (o.tables || []).map(normTable).forEach((t, i) => {
         const r = computeTable(t, i), g = r.geo;
         const kg = r.sheets.reduce((a, p) => a + Math.max(0, p.w) * Math.max(0, p.h), 0) / 1e6 * (t.thickness || 1.5) * 7.93 + r.tubes.reduce((a, p) => a + Math.max(0, p.len), 0) / 1000 * kgPerM;
-        const H = t.H + (t.splashOn ? (+t.splashH || 0) : 0);
-        for(let k = 0; k < t.qty; k++) units.push({ label:tag + " М" + (i + 1) + (t.qty > 1 ? "." + (k + 1) : ""), name:"маса " + t.L + "×" + t.D + "×" + t.H, kind:"table",
-          L:t.L, D:t.D, H, kg, cav:tableCavities(t, g), sig:null, comp:tableComp(t, g) });
+        for(let k = 0; k < t.qty; k++) units.push(makeUnit({ label:tag + " М" + (i + 1) + (t.qty > 1 ? "." + (k + 1) : ""), name:"маса " + t.L + "×" + t.D + "×" + t.H, kind:"table", kg }, tableComp(t, g), true));
       });
       (o.parts || []).map(normPart).forEach((p, i) => {
+        // the same parts lie one on another, in piles up to 30 cm
         const g = partGeo(p), B = boxOf(partFaces(p, g).faces.flatMap(f => f.pts));
-        for(let k = 0; k < p.qty; k++) units.push({ label:tag + " Д" + (i + 1), name:p.name, kind:"part", L:B.max[0] - B.min[0], D:B.max[1] - B.min[1], H:Math.max(2, B.max[2] - B.min[2]),
-          kg:g.kg, cav:null, sig:o.id + ":" + i });
+        const L = B.max[0] - B.min[0], D = B.max[1] - B.min[1], H = Math.max(2, B.max[2] - B.min[2]), per = Math.max(1, Math.floor(room / H));
+        for(let k = 0; k < p.qty; k += per){
+          const n = Math.min(per, p.qty - k);
+          units.push(makeUnit({ label:tag + " Д" + (i + 1) + (p.qty > 1 ? " ×" + n : ""), name:p.name + (n > 1 ? " — купчина от " + n : ""), kind:"part", kg:g.kg * n },
+            [{ x:0, y:0, z:0, dx:L, dy:D, dz:H * n, role:"part" }], false));
+        }
       });
       (o.assemblies || []).map(a => normAsm(a)).forEach((a, i) => {
         if(!a.items.length) return;
-        const B = boxOf(a.items.flatMap(it => itemFaces(it).flatMap(f => f.pts))), kg = a.items.reduce((s2, it) => s2 + partGeo(it.part).kg * it.part.qty, 0);
-        for(let k = 0; k < a.qty; k++) units.push({ label:tag + " Е" + (i + 1) + (a.qty > 1 ? "." + (k + 1) : ""), name:a.name, kind:"elem", L:B.max[0] - B.min[0], D:B.max[1] - B.min[1], H:B.max[2] - B.min[2],
-          kg, cav:null, sig:null });
+        const boxes = a.items.map(it => itemBox(it)), mn = [0, 1, 2].map(k => Math.min(...boxes.map(b => b.min[k])));
+        const comps = boxes.map(b => ({ x:b.min[0] - mn[0], y:b.min[1] - mn[1], z:b.min[2] - mn[2], dx:Math.max(1, b.max[0] - b.min[0]), dy:Math.max(1, b.max[1] - b.min[1]), dz:Math.max(1, b.max[2] - b.min[2]), role:"part" }));
+        const kg = a.items.reduce((s2, it) => s2 + partGeo(it.part).kg * it.part.qty, 0);
+        for(let k = 0; k < a.qty; k++) units.push(makeUnit({ label:tag + " Е" + (i + 1) + (a.qty > 1 ? "." + (k + 1) : ""), name:a.name, kind:"elem", kg }, comps, false));
       });
     });
-    units.forEach((u, i) => { u.uid = i; u.nested = []; u.in = null; });
     return units;
   }
-  const unitKg = u => u.kg + u.nested.reduce((a, n) => a + unitKg(n.u), 0);
+
+  const EPS = 0.5, GAP = 50;   // a part of a piece may be up to 5 cm above what carries it (a table on its side rests on the board edge and the legs)
+  const boxHit = (a, b) => a.x < b.x + b.dx - EPS && b.x < a.x + a.dx - EPS && a.y < b.y + b.dy - EPS && b.y < a.y + a.dy - EPS && a.z < b.z + b.dz - EPS && b.z < a.z + a.dz - EPS;
+  // does the piece stand: something right under it, and its middle over what carries it
+  function palStable(P, o, x, y, z, surf){
+    let area = 0, touch = false, x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    o.comps.forEach(k => {
+      if(k.z > GAP + EPS) return;
+      const kz = z + k.z;
+      surf.forEach(s => {
+        const gap = kz - s.top; if(gap < -EPS || gap > GAP + EPS) return;
+        const ax = Math.max(x + k.x, s.x), bx = Math.min(x + k.x + k.dx, s.x + s.dx), ay = Math.max(y + k.y, s.y), by = Math.min(y + k.y + k.dy, s.y + s.dy);
+        if(bx - ax <= 1 || by - ay <= 1) return;
+        area += (bx - ax) * (by - ay); if(gap <= EPS) touch = true;
+        x0 = Math.min(x0, ax); y0 = Math.min(y0, ay); x1 = Math.max(x1, bx); y1 = Math.max(y1, by);
+      });
+    });
+    if(!touch || area <= 0) return false;
+    const cx = x + o.dx / 2, cy = y + o.dy / 2;
+    return cx >= x0 - EPS && cx <= x1 + EPS && cy >= y0 - EPS && cy <= y1 + EPS;
+  }
+  // push a piece toward the start of the pallet along one axis until one of its parts touches something —
+  // that is how a table on its side goes with its legs into another table
+  function palSlide(o, pos, near, a){
+    const b = a === "x" ? "y" : "x", da = a === "x" ? "dx" : "dy", db = a === "x" ? "dy" : "dx";
+    let lim = 0;
+    for(const k of o.comps){
+      const kz0 = pos.z + k.z, kz1 = kz0 + k.dz, kb0 = pos[b] + k[b], kb1 = kb0 + k[db], ka0 = pos[a] + k[a];
+      for(const c of near){
+        const g = palS("palGap");
+        if(c.z >= kz1 - EPS || c.z + c.dz <= kz0 + EPS || c[b] - g >= kb1 - EPS || c[b] + c[db] + g <= kb0 + EPS) continue;
+        const ce = c[a] + c[da] + palS("palGap");
+        if(ce <= ka0 + EPS) lim = Math.max(lim, pos[a] - (ka0 - ce));
+      }
+    }
+    return Math.round(lim * 10) / 10;
+  }
+  // best place for a piece on pallet P (or null): touching what is there, using the least floor and height
+  function palPlace(P, u){
+    const palH = palS("palH"), maxH = palS("palMaxH");
+    const uniq = a => [...new Set(a.map(v => Math.round(v * 10) / 10))].sort((p, q) => p - q);
+    const G = palS("palGap");   // room left between pieces (sideways; standing on something needs none)
+    const xs = uniq([0].concat(P.comps.map(c => c.x + c.dx + G))), ys = uniq([0].concat(P.comps.map(c => c.y + c.dy + G)));
+    const zs = uniq([palH].concat(P.comps.map(c => c.z + c.dz)));
+    const surfAll = [{ x:P.ov, y:P.ov, dx:P.L, dy:P.Wd, top:palH }].concat(P.comps.map(c => ({ x:c.x, y:c.y, dx:c.dx, dy:c.dy, top:c.z + c.dz })));
+    const E0 = P.ext || { x1:0, y1:0, h:0 };
+    const scoreOf = (o, x, y, z) => {
+      const ext = { x1:Math.max(E0.x1, x + o.dx), y1:Math.max(E0.y1, y + o.dy), h:Math.max(E0.h, z + o.dz) };
+      return { ext, score:ext.x1 * ext.y1 / (P.maxW * P.maxD) + 0.6 * ext.h / maxH + 0.3 * (z - palH) / maxH + o.idx * 1e-4 + (x + y) * 1e-8 };
+    };
+    const hits = (o, x, y, z, near) => {
+      for(const c of near){
+        if(c.x - G >= x + o.dx - EPS || c.x + c.dx + G <= x + EPS || c.y - G >= y + o.dy - EPS || c.y + c.dy + G <= y + EPS) continue;
+        const cg = { x:c.x - G, y:c.y - G, z:c.z, dx:c.dx + 2 * G, dy:c.dy + 2 * G, dz:c.dz };
+        for(const k of o.comps) if(boxHit({ x:x + k.x, y:y + k.y, z:z + k.z, dx:k.dx, dy:k.dy, dz:k.dz }, cg)) return true;
+      }
+      return false;
+    };
+    let best = null;
+    u.poses.forEach(o => {
+      zs.forEach(z => {
+        if(z + o.dz > maxH + EPS) return;
+        const surf = surfAll.filter(s => s.top <= z + GAP + EPS && s.top >= z - EPS);
+        if(!surf.length) return;
+        const near = P.comps.filter(c => c.z < z + o.dz - EPS && c.z + c.dz > z + EPS);
+        const lb = scoreOf(o, 0, 0, z).score;
+        if(best && lb >= best.score) return;
+        ys.forEach(y => {
+          if(y + o.dy > P.maxD + EPS) return;
+          xs.forEach(x => {
+            if(x + o.dx > P.maxW + EPS) return;
+            if(hits(o, x, y, z, near)) return;
+            const cand = [{ x, y }];
+            const s = { x, y, z };
+            for(let r = 0; r < 2; r++){ s.y = palSlide(o, s, near, "y"); s.x = palSlide(o, s, near, "x"); }
+            if(s.x !== x || s.y !== y) cand.unshift({ x:s.x, y:s.y });
+            for(const q of cand){
+              const sc = scoreOf(o, q.x, q.y, z);
+              if(best && sc.score >= best.score) continue;
+              if(!palStable(P, o, q.x, q.y, z, surf)) continue;
+              best = { o, x:q.x, y:q.y, z, score:sc.score, ext:sc.ext };
+            }
+          });
+        });
+      });
+    });
+    return best;
+  }
+  // several orders of loading are tried; the plan with the fewest pallets (then the least floor, then the lowest) is kept
+  const PAL_ORDERS = [(a, b) => b.L * b.D * b.H - a.L * a.D * a.H, (a, b) => b.L * b.D - a.L * a.D || b.H - a.H,
+    (a, b) => Math.max(b.L, b.D) - Math.max(a.L, a.D) || b.L * b.D - a.L * a.D, (a, b) => b.kg - a.kg];
   function planPallets(orders){
-    const units = palletUnits(orders), maxH = palS("palMaxH"), palH = palS("palH"), ov = palS("palOver");
-    // 1. smaller pieces into bigger tables (largest first)
-    const byVol = units.slice().sort((a, b) => vol(b) - vol(a));
-    byVol.forEach(u => {
-      for(const h of byVol){
-        if(h === u || !h.cav || !h.cav.length || vol(h) <= vol(u)) continue;
-        for(const c of h.cav){
-          if(u.H > c.h) continue;
-          const pos = bestFit(c.sheet, u.L, u.D, "ss");
-          if(!pos) continue;
-          addPiece(c.sheet, { label:u.label }, pos, 0);
-          const pl = c.sheet.placed[c.sheet.placed.length - 1];
-          h.nested.push({ u, c, x:pl.x, y:pl.y, w:pl.w, h:pl.h, rot:pos.rot });
-          u.in = h; break;
-        }
-        if(u.in) break;
-      }
-    });
-    // 2. identical flat parts that are left: one pile, as high as the pallet allows
-    let tops = units.filter(u => !u.in);
-    const piles = new Map(), rest = [];
-    tops.forEach(u => { if(u.kind === "part" && u.sig){ if(!piles.has(u.sig)) piles.set(u.sig, []); piles.get(u.sig).push(u); } else rest.push(u); });
-    piles.forEach(list => {
-      const per = Math.max(1, Math.floor((maxH - palH) / list[0].H));
-      for(let i = 0; i < list.length; i += per){
-        const grp = list.slice(i, i + per), f = grp[0];
-        rest.push(Object.assign({}, f, { label:f.label + (grp.length > 1 ? " ×" + grp.length : ""), H:f.H * grp.length, kg:f.kg * grp.length, pile:grp.length, nested:[] }));
-      }
-    });
-    tops = rest.sort((a, b) => b.L * b.D - a.L * a.D || b.H - a.H);
-    // 3. onto pallets (first fit; a new pallet is the smallest standard one that takes the piece, else one made to size)
+    const units = palletUnits(orders);
+    let win = null;
+    PAL_ORDERS.forEach(order => [false, true].forEach(best => {
+      const r = packPallets(units, order, best);
+      const key = [r.length, r.filter(P => P.custom).length, r.reduce((a, P) => a + P.type.L * P.type.W, 0), r.reduce((a, P) => a + P.height, 0)];
+      const i = win ? key.findIndex((v, j) => Math.abs(v - win.key[j]) > 0.5) : -1;
+      if(!win || (i >= 0 && key[i] < win.key[i])) win = { key, pallets:r };
+    }));
+    return { pallets:win.pallets, units };
+  }
+  function packPallets(units, order, best){
+    const palH = palS("palH"), maxH = palS("palMaxH"), maxKg = palS("palMaxKg"), ov = palS("palOver");
     const types = [{ name:"EUR", L:palS("palAL"), W:palS("palAW") }, { name:"Индустриален", L:palS("palBL"), W:palS("palBW") }]
-      .filter(t => t.L > 0 && t.W > 0).sort((a, b) => a.L * a.W - b.L * b.W);
-    const fits = (u, t) => { const A = Math.max(t.L, t.W) + 2 * ov, B = Math.min(t.L, t.W) + 2 * ov; return (u.L <= A && u.D <= B) || (u.D <= A && u.L <= B); };
+      .filter(t => t.L > 0 && t.W > 0).map(t => ({ name:t.name, L:Math.max(t.L, t.W), W:Math.min(t.L, t.W) }));
     const pallets = [];
-    const newPallet = t => { const P = { type:t, ov, sheet:newSheet({ W:Math.max(t.L, t.W) + 2 * ov, H:Math.min(t.L, t.W) + 2 * ov }, 0), items:[], kg:palS("palKg") }; pallets.push(P); return P; };
-    tops.forEach(u => {
-      const need = unitKg(u);
-      let P = pallets.find(p => p.kg + need <= palS("palMaxKg") && bestFit(p.sheet, u.L, u.D, "bl"));
-      if(!P){
-        const t = types.find(x => fits(u, x)) || { name:"по размер", L:Math.ceil(Math.max(u.L, u.D) / 50) * 50, W:Math.ceil(Math.min(u.L, u.D) / 50) * 50, custom:true };
-        P = newPallet(t);
+    const newPallet = (t, custom) => ({ type:t, custom, ov:custom ? 0 : ov, L:t.L, Wd:t.W, maxW:t.L + (custom ? 0 : 2 * ov), maxD:custom ? Math.max(t.W, palS("palCustW")) : t.W + 2 * ov,
+      comps:[], items:[], kg:palS("palKg"), ext:null });
+    const put = (P, u, b) => {
+      const comps = b.o.comps.map(k => ({ x:b.x + k.x, y:b.y + k.y, z:b.z + k.z, dx:k.dx, dy:k.dy, dz:k.dz, role:k.role, owner:P.items.length }));
+      P.comps.push(...comps); P.items.push({ u, o:b.o, x:b.x, y:b.y, z:b.z, comps }); P.kg += u.kg; P.ext = b.ext;
+    };
+    // the big ones first; each goes onto a pallet that already has room (the first one, or the one where it sits best), else onto a new one
+    units.slice().sort(order).forEach(u => {
+      if(best){
+        let bb = null;
+        pallets.forEach(P => { if(P.kg + u.kg > maxKg) return; const b = palPlace(P, u); if(b && (!bb || b.score < bb.b.score)) bb = { P, b }; });
+        if(bb){ put(bb.P, u, bb.b); return; }
       }
-      const pos = bestFit(P.sheet, u.L, u.D, "bl");
-      addPiece(P.sheet, { label:u.label }, pos, 0);
-      const pl = P.sheet.placed[P.sheet.placed.length - 1];
-      P.items.push({ u, x:pl.x, y:pl.y, w:pl.w, h:pl.h, rot:pos.rot });
-      P.kg += need;
+      else for(const P of pallets){ if(P.kg + u.kg > maxKg) continue; const b = palPlace(P, u); if(b){ put(P, u, b); return; } }
+      // new pallet: the biggest standard one it fits on (it is made smaller at the end if the load allows), else one made to size
+      const big = types.slice().sort((a, b) => b.L * b.W - a.L * a.W);
+      for(const t of big){ const P = newPallet(t, false), b = palPlace(P, u); if(b){ put(P, u, b); pallets.push(P); return; } }
+      const o = u.poses.filter(p => p.dz + palH <= maxH + EPS).sort((a, b) => a.dx * a.dy - b.dx * b.dy)[0] || u.poses[0];
+      const t = { name:"по размер", L:Math.ceil(Math.max(o.dx, o.dy) / 50) * 50, W:Math.ceil(Math.min(o.dx, o.dy) / 50) * 50 };
+      const P = newPallet(t, true); let b = palPlace(P, u);
+      if(!b){ const oo = o.dx >= o.dy ? o : posed(o.comps, [0, 0, 1]); b = { o:Object.assign(oo, { how:o.how, idx:o.idx }), x:0, y:0, z:palH, ext:{ x1:oo.dx, y1:oo.dy, h:palH + oo.dz } }; }
+      put(P, u, b); pallets.push(P);
     });
     pallets.forEach(P => {
-      P.height = palH + Math.max(0, ...P.items.map(i => i.u.H));
+      // the smallest pallet that takes the load
+      const need = { x:P.ext.x1, y:P.ext.y1 };
+      if(P.custom){ P.type = { name:"по размер", L:Math.ceil(need.x / 50) * 50, W:Math.ceil(need.y / 50) * 50 }; P.L = P.type.L; P.Wd = P.type.W; }
+      else{ const t = types.slice().sort((a, b) => a.L * a.W - b.L * b.W).find(t => need.x <= t.L + 2 * ov + EPS && need.y <= t.W + 2 * ov + EPS); if(t){ P.type = t; P.L = t.L; P.Wd = t.W; } }
+      P.height = P.ext.h;
       P.warn = [];
-      if(P.height > maxH) P.warn.push("По-висок от " + maxH + " мм (" + Math.round(P.height) + " мм).");
-      if(P.kg > palS("palMaxKg")) P.warn.push("По-тежък от " + palS("palMaxKg") + " кг.");
-      if(P.type.custom) P.warn.push("Нужен е палет по размер " + P.type.L + " × " + P.type.W + " мм (масата е по-голяма от стандартните палети).");
-    });
-    return { pallets, units };
-  }
-  // every box of a pallet in world coordinates (pallet sheet: x along its long side; z up), nested ones inside their host
-  function palletBoxes(P){
-    const palH = palS("palH"), out = [{ x:P.ov, y:P.ov, z:0, dx:Math.max(P.type.L, P.type.W), dy:Math.min(P.type.L, P.type.W), dz:palH, pal:true, label:"" }];
-    const put = (u, x, y, z, rot, depth) => {
-      const dx = rot ? u.D : u.L, dy = rot ? u.L : u.D;
-      // a table's parts, in the pallet's frame (a turned table: its length runs along y)
-      const comp = u.comp ? u.comp.map(c => rot ? { x:x + c.y, y:y + c.x, z:z + c.z, dx:c.dy, dy:c.dx, dz:c.dz } : { x:x + c.x, y:y + c.y, z:z + c.z, dx:c.dx, dy:c.dy, dz:c.dz }) : null;
-      out.push({ x, y, z, dx, dy, dz:u.H, label:u.label, host:u.nested.length > 0, depth, kind:u.kind, comp });
-      u.nested.forEach(n => {
-        // position inside the host (host frame: x along L, y along D); a turned host swaps the axes
-        let lx, ly, w, d;
-        if(!n.c.swap){ lx = n.c.x0 + n.x; ly = n.c.y0 + n.y; w = n.w; d = n.h; } else { lx = n.c.x0 + n.y; ly = n.c.y0 + n.x; w = n.h; d = n.w; }
-        const nrot = (w !== n.u.L) !== !!rot;
-        put(n.u, x + (rot ? ly : lx), y + (rot ? lx : ly), z + n.c.z, nrot, depth + 1);
+      if(P.height > maxH + EPS) P.warn.push("По-висок от " + maxH + " мм (" + Math.round(P.height) + " мм).");
+      if(P.kg > maxKg) P.warn.push("По-тежък от " + maxKg + " кг.");
+      if(P.custom) P.warn.push("Нужен е палет по размер " + P.type.L + " × " + P.type.W + " мм (не се събира на стандартен палет).");
+      // what is in / partly in / on what
+      P.items.forEach((it, i) => {
+        const bb = { x:it.x, y:it.y, z:it.z, dx:it.o.dx, dy:it.o.dy, dz:it.o.dz };
+        it.rel = []; it.step = i + 1;
+        P.items.forEach((h, j) => {
+          if(j === i) return;
+          const hb = { x:h.x, y:h.y, z:h.z, dx:h.o.dx, dy:h.o.dy, dz:h.o.dz };
+          if(boxHit(bb, hb)){
+            const inside = bb.x >= hb.x - EPS && bb.y >= hb.y - EPS && bb.z >= hb.z - EPS && bb.x + bb.dx <= hb.x + hb.dx + EPS && bb.y + bb.dy <= hb.y + hb.dy + EPS && bb.z + bb.dz <= hb.z + hb.dz + EPS;
+            if(inside || j < i) it.rel.push({ j, t:inside ? "вътре в" : "отчасти вкарана в" });
+          } else if(j < i && Math.abs(bb.z - (hb.z + hb.dz)) < GAP && bb.x < hb.x + hb.dx && hb.x < bb.x + bb.dx && bb.y < hb.y + hb.dy && hb.y < bb.y + bb.dy && bb.z > palH + EPS)
+            it.rel.push({ j, t:"върху" });
+        });
       });
-    };
-    P.items.forEach(it => put(it.u, it.x, it.y, palH, it.rot, 0));
-    return out;
+    });
+    return pallets;
   }
+  // 3D: the pallet and every part of every piece; the tops are see-through so what is inside shows
   function pallet3D(P, V){
-    const boxes = palletBoxes(P), faces = [];
-    const HUE = { table:210, part:28, elem:145 };
-    boxes.flatMap(b => b.comp ? b.comp.map(c => Object.assign({}, c, { owner:b })) : [Object.assign({}, b, { owner:b })]).forEach((cb, bi) => {
-      const b = cb.owner, X = [cb.x, cb.x + cb.dx], Y = [cb.y, cb.y + cb.dy], Z = [cb.z, cb.z + cb.dz];
+    const HUE = { table:210, part:28, elem:145 }, faces = [];
+    const boxes = [{ x:P.ov, y:P.ov, z:0, dx:P.L, dy:P.Wd, dz:palS("palH"), pal:true }].concat(P.items.flatMap(it => it.comps.map(c => Object.assign({}, c, { kind:it.u.kind, inner:it.rel.some(r => r.t !== "върху") }))));
+    boxes.forEach(b => {
+      const X = [b.x, b.x + b.dx], Y = [b.y, b.y + b.dy], Z = [b.z, b.z + b.dz];
       const P8 = (i, j, k) => [X[i], Y[j], Z[k]];
       [[P8(0,0,0),P8(1,0,0),P8(1,1,0),P8(0,1,0)], [P8(0,0,1),P8(1,0,1),P8(1,1,1),P8(0,1,1)], [P8(0,0,0),P8(1,0,0),P8(1,0,1),P8(0,0,1)],
-       [P8(0,1,0),P8(1,1,0),P8(1,1,1),P8(0,1,1)], [P8(0,0,0),P8(0,1,0),P8(0,1,1),P8(0,0,1)], [P8(1,0,0),P8(1,1,0),P8(1,1,1),P8(1,0,1)]].forEach(pts => faces.push({ pts, b, bi }));
+       [P8(0,1,0),P8(1,1,0),P8(1,1,1),P8(0,1,1)], [P8(0,0,0),P8(0,1,0),P8(0,1,1),P8(0,0,1)], [P8(1,0,0),P8(1,1,0),P8(1,1,1),P8(1,0,1)]].forEach(pts => faces.push({ pts, b }));
     });
-    const all = faces.flatMap(f => f.pts), B = boxOf(all), c = [0, 1, 2].map(k => (B.min[k] + B.max[k]) / 2);
+    const B = boxOf(faces.flatMap(f => f.pts)), c = [0, 1, 2].map(k => (B.min[k] + B.max[k]) / 2);
     const cyw = Math.cos(V.yaw), syw = Math.sin(V.yaw), cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
     const pr = q => { const x = q[0] - c[0], y = q[1] - c[1], z = q[2] - c[2]; const x1 = x * cyw - y * syw, y1 = x * syw + y * cyw; return [x1, -(z * cp + y1 * sp), y1 * cp - z * sp]; };
     const PF = faces.map(f => ({ f, P:f.pts.map(pr) }));
-    const flat = PF.flatMap(r => r.P), VW = 620, VH = 380, pad = 30;
+    const flat = PF.flatMap(r => r.P), VW = 620, VH = 400, pad = 30;
     const minX = Math.min(...flat.map(r => r[0])), maxX = Math.max(...flat.map(r => r[0])), minY = Math.min(...flat.map(r => r[1])), maxY = Math.max(...flat.map(r => r[1]));
     const k = Math.min((VW - 2 * pad) / Math.max(1, maxX - minX), (VH - 2 * pad) / Math.max(1, maxY - minY)), ox = (VW - (maxX - minX) * k) / 2, oy = (VH - (maxY - minY) * k) / 2;
     const sx = r => (ox + (r[0] - minX) * k).toFixed(1), sy = r => (oy + (r[1] - minY) * k).toFixed(1);
@@ -3005,23 +3100,30 @@
     let svg = '';
     PF.forEach(r => {
       const b = r.f.b, n = v3.cross(v3.sub(r.f.pts[1], r.f.pts[0]), v3.sub(r.f.pts[3], r.f.pts[0])), lit = Math.abs(n[2]) / (Math.hypot(...n) || 1);
-      const fill = b.pal ? 'hsl(30,40%,' + (52 + lit * 14) + '%)' : 'hsl(' + (HUE[b.kind] || 210) + ',' + (b.depth ? 55 : 30) + '%,' + (58 + lit * 22) + '%)';
-      const op = b.pal ? 1 : (b.comp ? 0.9 : 0.92);
-      svg += '<path d="M' + r.P.map(p => sx(p) + ',' + sy(p)).join(' L') + ' Z" fill="' + fill + '" fill-opacity="' + op + '" stroke="' + (b.pal ? '#7c5a32' : 'hsl(' + (HUE[b.kind] || 210) + ',40%,30%)') + '" stroke-width="' + (b.depth ? 1.4 : 0.9) + '"' + (b.depth ? ' stroke-dasharray="4 2"' : '') + '/>';
+      const hue = HUE[b.kind] || 210, fill = b.pal ? 'hsl(30,40%,' + (52 + lit * 14) + '%)' : 'hsl(' + (b.inner ? 12 : hue) + ',' + (b.inner ? 70 : 32) + '%,' + (56 + lit * 22) + '%)';
+      const op = b.pal ? 1 : (b.role === "top" ? 0.55 : 0.92);
+      svg += '<path d="M' + r.P.map(p => sx(p) + ',' + sy(p)).join(' L') + ' Z" fill="' + fill + '" fill-opacity="' + op + '" stroke="' + (b.pal ? '#7c5a32' : 'hsl(' + (b.inner ? 12 : hue) + ',45%,28%)') + '" stroke-width="0.9"/>';
     });
-    boxes.filter(b => !b.pal).forEach(b => { const t = pr([b.x + b.dx / 2, b.y + b.dy / 2, b.z + b.dz]);
-      svg += '<text x="' + sx(t) + '" y="' + (+sy(t) - 5).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="800" fill="#15223a" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(b.label) + '</text>'; });
+    P.items.forEach(it => { const t = pr([it.x + it.o.dx / 2, it.y + it.o.dy / 2, it.z + it.o.dz]);
+      svg += palBadge(+sx(t), +sy(t) - 10, it.step); });
     return '<svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="background:#f8fafc;width:100%;height:auto;display:block">' + svg + '</svg>';
   }
-  // top view: the pallet, what stands on it (and, dashed, what is inside)
+  const palBadge = (x, y, n) => '<circle cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="10" fill="#15223a" stroke="#fff" stroke-width="2"/><text x="' + x.toFixed(1) + '" y="' + (y + 4).toFixed(1) + '" text-anchor="middle" font-size="11" font-weight="800" fill="#fff">' + n + '</text>';
+  // top view: the pallet and the outline of each piece (dashed = in or partly in another)
   function palletTop(P){
-    const W = P.sheet.W, H = P.sheet.H, k = Math.min(560 / W, 300 / H), pad = 20;
+    const W = Math.max(P.L + 2 * P.ov, P.ext.x1), H = Math.max(P.Wd + 2 * P.ov, P.ext.y1), k = Math.min(560 / W, 300 / H), pad = 20;
     const R = (x, y, w, h, st) => '<rect x="' + (pad + x * k).toFixed(1) + '" y="' + (pad + y * k).toFixed(1) + '" width="' + (w * k).toFixed(1) + '" height="' + (h * k).toFixed(1) + '" ' + st + '/>';
-    let s = R(0, 0, W, H, 'fill="none" stroke="#cbd5e1" stroke-dasharray="4 3"') + R(P.ov, P.ov, Math.max(P.type.L, P.type.W), Math.min(P.type.L, P.type.W), 'fill="#f3e8d8" stroke="#7c5a32" stroke-width="2"');
-    palletBoxes(P).filter(b => !b.pal).forEach(b => {
-      s += R(b.x, b.y, b.dx, b.dy, b.depth ? 'fill="none" stroke="#1e3a8a" stroke-width="1.3" stroke-dasharray="5 3"' : 'fill="#dbeafe" fill-opacity=".85" stroke="#1E6FF4" stroke-width="2"');
-      const corner = b.host && !b.depth;
-      s += '<text x="' + (pad + (corner ? b.x * k + 6 : (b.x + b.dx / 2) * k)).toFixed(1) + '" y="' + (pad + (corner ? b.y * k + 14 : (b.y + b.dy / 2) * k)).toFixed(1) + '" text-anchor="' + (corner ? "start" : "middle") + '" font-size="11" font-weight="' + (b.depth ? 600 : 800) + '" fill="#15223a">' + esc(b.label) + (b.depth ? ' (вътре)' : '') + '</text>';
+    let s = R(P.ov, P.ov, P.L, P.Wd, 'fill="#f3e8d8" stroke="#7c5a32" stroke-width="2"');
+    P.items.forEach(it => {
+      const inner = it.rel.length > 0;
+      s += R(it.x, it.y, it.o.dx, it.o.dy, inner ? 'fill="#fee2e2" fill-opacity=".55" stroke="#c2410c" stroke-width="1.4" stroke-dasharray="5 3"' : 'fill="#dbeafe" fill-opacity=".8" stroke="#1E6FF4" stroke-width="2"');
+    });
+    // the numbers last, each a little apart from those already drawn
+    const used = [];
+    P.items.forEach(it => {
+      let cx = pad + (it.x + it.o.dx / 2) * k, cy = pad + (it.y + it.o.dy / 2) * k;
+      while(used.some(q => Math.hypot(q[0] - cx, q[1] - cy) < 22)) cx += 24;
+      used.push([cx, cy]); s += palBadge(cx, cy, it.step);
     });
     return '<svg viewBox="0 0 ' + (W * k + 2 * pad).toFixed(0) + ' ' + (H * k + 2 * pad).toFixed(0) + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="width:100%;max-width:640px;height:auto;display:block;background:#fff">' + s + '</svg>';
   }
@@ -3029,7 +3131,8 @@
   /* ---------- страница „Палети“ ---------- */
   var PSEL = null;   // orders ticked for the plan (null = the ones in В обработка)
   const PAL_FIELDS = [["palAL","Палет 1 (EUR) — дължина"],["palAW","Палет 1 — ширина"],["palBL","Палет 2 — дължина"],["palBW","Палет 2 — ширина"],
-    ["palH","Височина на палета"],["palKg","Тегло на палета (кг)"],["palMaxH","Макс. височина с товара"],["palMaxKg","Макс. тегло на палет (кг)"],["palOver","Позволено надвисване (мм от всяка страна)"]];
+    ["palH","Височина на палета"],["palKg","Тегло на палета (кг)"],["palMaxH","Макс. височина с товара"],["palMaxKg","Макс. тегло на палет (кг)"],
+    ["palOver","Позволено надвисване (мм от всяка страна)"],["palCustW","Палет по размер — макс. ширина"],["palGap","Луфт между нещата (мм)"]];
   function renderPallets(){
     const host = $("palSettings"); if(!host) return;
     host.innerHTML = PAL_FIELDS.map(([k, l]) => '<label>' + esc(l) + '<input type="number" min="0" step="1" data-pal="' + k + '" value="' + esc(palS(k)) + '"></label>').join("");
@@ -3046,22 +3149,23 @@
     const out = $("palResult");
     if(!orders.length){ out.innerHTML = '<div class="card"><div class="empty">Отметнете поне една поръчка.</div></div>'; return; }
     const { pallets, units } = planPallets(orders);
-    const nested = units.filter(u => u.in), totalKg = pallets.reduce((a, P) => a + P.kg, 0);
+    const totalKg = pallets.reduce((a, P) => a + P.kg, 0), all = pallets.flatMap(P => P.items.map(it => ({ P, it })));
+    const relTxt = (P, it) => it.rel.map(r => r.t + " " + P.items[r.j].u.label).join(", ");
+    const linked = all.filter(x => x.it.rel.length);
     let h = '<div class="card summary"><h2>Палети — ' + orders.map(ordTag).join(", ") + '</h2><div class="totals">' +
       tot("Палети", pallets.length + " бр.", pallets.map(P => P.type.name + " " + P.type.L + "×" + P.type.W).join(", ")) +
       tot("Общо тегло", Math.round(totalKg) + " кг", "с палетите") +
-      tot("Вложени една в друга", nested.length + " бр.", nested.length ? nested.map(u => u.label + " → " + u.in.label).join(", ") : "нищо не влиза в друго") +
+      tot("Една в/върху друга", linked.length + " бр.", linked.length ? linked.map(x => x.it.u.label + " " + relTxt(x.P, x.it)).join("; ") : "всичко стои отделно") +
       tot("Бройки", units.length + " бр.", "маси, детайли и елементи") + '</div></div>';
     pallets.forEach((P, i) => {
-      const dims = (P.type.L) + " × " + (P.type.W) + " × " + Math.round(P.height) + " мм";
-      h += '<div class="card palcard"><h2>Палет ' + (i + 1) + ' · ' + esc(P.type.name) + ' — ' + dims + ' · ' + Math.round(P.kg) + ' кг</h2>' +
+      h += '<div class="card palcard"><h2>Палет ' + (i + 1) + ' · ' + esc(P.type.name) + ' — ' + P.type.L + ' × ' + P.type.W + ' × ' + Math.round(P.height) + ' мм · ' + Math.round(P.kg) + ' кг</h2>' +
         P.warn.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
-        '<div class="palviews"><div>' + pallet3D(P, { yaw:-0.6, pitch:0.55 }) + '<div class="muted">3D · вложените са с пунктир вътре в масата</div></div><div>' + palletTop(P) + '<div class="muted">Отгоре · кафяво = палетът</div></div></div>' +
-        '<div class="tw"><table class="cut"><thead><tr><th>На палета</th><th>Какво е</th><th>Габарит Д × Ш × В (мм)</th><th>Тегло (кг)</th><th>Вътре в него</th></tr></thead><tbody>' +
-        P.items.map(it => { const u = it.u, inner = [];
-          const walk = x => x.nested.forEach(n => { inner.push(n.u.label + " (" + n.u.name + ")"); walk(n.u); }); walk(u);
-          return '<tr><td class="size">' + esc(u.label) + '</td><td>' + esc(u.name) + (u.pile ? ' — купчина от ' + u.pile : '') + '</td><td class="size">' + fmt(u.L) + ' × ' + fmt(u.D) + ' × ' + fmt(u.H) +
-            '</td><td class="q">' + unitKg(u).toFixed(1) + '</td><td>' + esc(inner.join(", ") || "—") + '</td></tr>'; }).join("") + '</tbody></table></div></div>';
+        '<div class="palviews"><div>' + pallet3D(P, { yaw:-0.6, pitch:0.55 }) + '<div class="muted">3D · номерата са редът на товарене; в оранжево е вкараното в друга маса</div></div><div>' + palletTop(P) +
+        '<div class="muted">Отгоре · кафяво = палетът, пунктир = вътре / отчасти в друга маса или върху нея</div></div></div>' +
+        '<div class="tw"><table class="cut"><thead><tr><th>Ред</th><th>Какво</th><th>Как стои</th><th>Габарит Д × Ш × В (мм)</th><th>Тегло (кг)</th><th>Къде</th></tr></thead><tbody>' +
+        P.items.map(it => '<tr><td class="q">' + it.step + '</td><td><b>' + esc(it.u.label) + '</b> ' + esc(it.u.name) + '</td><td>' + esc(it.o.how) + '</td><td class="size">' + fmt(it.o.dx) + ' × ' + fmt(it.o.dy) + ' × ' + fmt(it.o.dz) +
+          '</td><td class="q">' + it.u.kg.toFixed(1) + '</td><td>' + esc(relTxt(P, it) || (it.z > palS("palH") + EPS ? "повдигната" : "на палета")) + '</td></tr>').join("") + '</tbody></table></div>' +
+        '<div class="muted">Товари се по реда в първата колона.</div></div>';
     });
     out.innerHTML = h;
   }
