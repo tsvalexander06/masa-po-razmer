@@ -626,13 +626,18 @@
   }
 
   /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО в app.js и admin/admin.js =====
-     Цена = (материал по площ + тръба по дължина + заварки + огъвания) × (1 + надценка%).
-     - материал: площ на разгъвката × PRICE.sheetM2 (€/м²)
+     Цена = (лист + тръба по дължина + заварки + огъвания + тапички) × (1 + надценка%).
+     - лист: всяка маса се смята сама, все едно се реже от НОВИ листове — броят се целите листове,
+       на които се събират заготовките й (остатъкът/фирата не се приспада; ако трябва още един лист,
+       той се плаща цял). Избира се най-евтината комбинация от PRICE.sheets. В „Разкрой“ реалният
+       разкрой си ползва фирата от склада — това не променя цената.
      - тръба: дължина на краката × PRICE.tubeM (€/м)
      - заварки: 48€ на етаж (12см × 4 крака × 1€/см) — плот + всеки долен плот
      - огъвания: 0.5€ на огъване */
   const PRICE = {
-    sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
+    sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
+    sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
+    kerf: 3,            // мм между заготовките при рязане
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
     bend: 1,            // € за огъване (90°)
@@ -642,17 +647,63 @@
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
-  function pBlankM2(t){
+  // заготовките на една маса (мм): плот и долните плотове
+  function pBlanks(t){
     const P=PRICE, g=tableGeo(t,P), cT=P.topCut/2, cS=P.shelfCut/2;
     const ft=g.eT+g.rT-P.stretch-cT;
     const back = t.splashOn ? (+t.splashH||0)+g.hem-cT : ft;
-    const topW=(t.L+2*ft)/1000, topD=(g.Dp+ft+back)/1000;
-    const shelf=(e,r)=>{ const f=e+r-P.stretch-cS; return (g.shL>0&&g.shD>0)?((g.shL+2*f)/1000)*((g.shD+2*f)/1000):0; };
-    return Math.max(0,topW*topD) + (t.baseOn?shelf(g.eB,g.rB):0) + (t.midOn?shelf(g.eM,g.rM):0);
+    const out=[[t.L+2*ft, g.Dp+ft+back]];
+    const shelf=(e,r)=>{ const f=e+r-P.stretch-cS; if(g.shL>0&&g.shD>0) out.push([g.shL+2*f, g.shD+2*f]); };
+    if(t.baseOn) shelf(g.eB,g.rB);
+    if(t.midOn) shelf(g.eM,g.rM);
+    return out.filter(([w,h])=>w>0&&h>0);
+  }
+  const pBlankM2 = t => pBlanks(t).reduce((a,[w,h])=>a+w*h,0)/1e6;
+  // one rectangle into a sheet (MaxRects, best short side, may turn); false if it does not fit
+  function pPut(s,w,h){
+    let b=null;
+    s.free.forEach(r=>[[w,h],[h,w]].forEach(([pw,ph])=>{ if(pw>r.w||ph>r.h) return;
+      const sc=Math.min(r.w-pw,r.h-ph); if(!b||sc<b.sc) b={x:r.x,y:r.y,w:pw,h:ph,sc}; }));
+    if(!b) return false;
+    const out=[];
+    s.free.forEach(f=>{
+      if(b.x>=f.x+f.w||b.x+b.w<=f.x||b.y>=f.y+f.h||b.y+b.h<=f.y){ out.push(f); return; }
+      if(b.x>f.x) out.push({x:f.x,y:f.y,w:b.x-f.x,h:f.h});
+      if(b.x+b.w<f.x+f.w) out.push({x:b.x+b.w,y:f.y,w:f.x+f.w-b.x-b.w,h:f.h});
+      if(b.y>f.y) out.push({x:f.x,y:f.y,w:f.w,h:b.y-f.y});
+      if(b.y+b.h<f.y+f.h) out.push({x:f.x,y:b.y+b.h,w:f.w,h:f.y+f.h-b.y-b.h});
+    });
+    s.free=out.filter((a,i)=>!out.some((c,j)=>j!==i&&a.x>=c.x&&a.y>=c.y&&a.x+a.w<=c.x+c.w&&a.y+a.h<=c.y+c.h&&(j<i||a.w!==c.w||a.h!==c.h||a.x!==c.x||a.y!==c.y)));
+    return true;
+  }
+  // the sheet of one table, as if it were cut from new sheets: whole sheets, the cheapest choice
+  function pSheets(t){
+    const K=PRICE.kerf, th=(+t.thickness||1.5)/1.5;
+    const types=PRICE.sheets.map(([W,H,p])=>({W:Math.max(W,H),H:Math.min(W,H),p})).filter(x=>x.W>0&&x.H>0);
+    const fitsAny=([w,h])=>types.some(x=>(w<=x.W&&h<=x.H)||(h<=x.W&&w<=x.H));
+    const pcs=pBlanks(t).filter(fitsAny).sort((a,b)=>b[0]*b[1]-a[0]*a[1]);
+    const big=pBlanks(t).filter(b=>!fitsAny(b));   // по-голяма от всеки лист — по площ
+    let best=null;
+    const n=pcs.length, combos=Math.pow(types.length, n);
+    for(let c=0;c<combos;c++){
+      const seq=[]; let v=c; for(let i=0;i<n;i++){ seq.push(types[v%types.length]); v=Math.floor(v/types.length); }
+      const sheets=[]; let ok=true;
+      for(const [w,h] of pcs){
+        if(sheets.some(s=>pPut(s,w+K,h+K))) continue;
+        const ty=seq[sheets.length], s={ty,free:[{x:0,y:0,w:ty.W+K,h:ty.H+K}]};
+        if(!pPut(s,w+K,h+K)){ ok=false; break; }
+        sheets.push(s);
+      }
+      if(!ok) continue;
+      const cost=sheets.reduce((a,s)=>a+s.ty.p,0);
+      if(!best||cost<best.cost) best={cost,list:sheets.map(s=>s.ty.W+"×"+s.ty.H)};
+    }
+    const bigCost=big.reduce((a,[w,h])=>a+w*h/1e6*PRICE.sheetM2,0);
+    return { cost:((best?best.cost:0)+bigCost)*th, sheets:best?best.list:[], count:best?best.list.length:0 };
   }
   const pTubeM = t => tableGeo(t,PRICE).legs.reduce((a,l)=>a+Math.max(0,l),0)/1000;
   function priceParts(t){
-    const mat=pBlankM2(t)*PRICE.sheetM2, tube=pTubeM(t)*PRICE.tubeM,
+    const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM,
           weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
     const caps=4*PRICE.capEach;   // тапички на краката — към цената, без надценка
     return { mat, tube, weld, bend, caps, base:mat+tube+weld+bend };

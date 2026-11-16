@@ -108,9 +108,12 @@
   const mid2H = t => Math.round((t.baseH + Math.max(0, t.H - 40)) / 2);
 
   /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО с site/app.js =====
-     Цена = (материал по площ + тръба по дължина + заварки + огъвания) × (1 + надценка%). */
+     Цена = (лист + тръба + заварки + огъвания + тапички) × (1 + надценка%).
+     Лист: всяка маса — цели НОВИ листове (pSheets), без приспадане на фирата; разкроят ползва фирата отделно. */
   const PRICE = {
-    sheetM2: 45,        // € за м² разгъвка (≈ 90€ / 2.0 м²)
+    sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
+    sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
+    kerf: 3,            // мм между заготовките при рязане
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
     bend: 1,            // € за огъване (90°)
@@ -120,17 +123,63 @@
   };
   const pFloors = t => 1 + (t.baseOn?1:0) + (t.midOn?1:0);
   const pBends  = t => (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
-  function pBlankM2(t){
+  // заготовките на една маса (мм): плот и долните плотове
+  function pBlanks(t){
     const P=PRICE, g=tableGeo(t,P), cT=P.topCut/2, cS=P.shelfCut/2;
     const ft=g.eT+g.rT-P.stretch-cT;
     const back = t.splashOn ? (+t.splashH||0)+g.hem-cT : ft;
-    const topW=(t.L+2*ft)/1000, topD=(g.Dp+ft+back)/1000;
-    const shelf=(e,r)=>{ const f=e+r-P.stretch-cS; return (g.shL>0&&g.shD>0)?((g.shL+2*f)/1000)*((g.shD+2*f)/1000):0; };
-    return Math.max(0,topW*topD) + (t.baseOn?shelf(g.eB,g.rB):0) + (t.midOn?shelf(g.eM,g.rM):0);
+    const out=[[t.L+2*ft, g.Dp+ft+back]];
+    const shelf=(e,r)=>{ const f=e+r-P.stretch-cS; if(g.shL>0&&g.shD>0) out.push([g.shL+2*f, g.shD+2*f]); };
+    if(t.baseOn) shelf(g.eB,g.rB);
+    if(t.midOn) shelf(g.eM,g.rM);
+    return out.filter(([w,h])=>w>0&&h>0);
+  }
+  const pBlankM2 = t => pBlanks(t).reduce((a,[w,h])=>a+w*h,0)/1e6;
+  // one rectangle into a sheet (MaxRects, best short side, may turn); false if it does not fit
+  function pPut(s,w,h){
+    let b=null;
+    s.free.forEach(r=>[[w,h],[h,w]].forEach(([pw,ph])=>{ if(pw>r.w||ph>r.h) return;
+      const sc=Math.min(r.w-pw,r.h-ph); if(!b||sc<b.sc) b={x:r.x,y:r.y,w:pw,h:ph,sc}; }));
+    if(!b) return false;
+    const out=[];
+    s.free.forEach(f=>{
+      if(b.x>=f.x+f.w||b.x+b.w<=f.x||b.y>=f.y+f.h||b.y+b.h<=f.y){ out.push(f); return; }
+      if(b.x>f.x) out.push({x:f.x,y:f.y,w:b.x-f.x,h:f.h});
+      if(b.x+b.w<f.x+f.w) out.push({x:b.x+b.w,y:f.y,w:f.x+f.w-b.x-b.w,h:f.h});
+      if(b.y>f.y) out.push({x:f.x,y:f.y,w:f.w,h:b.y-f.y});
+      if(b.y+b.h<f.y+f.h) out.push({x:f.x,y:b.y+b.h,w:f.w,h:f.y+f.h-b.y-b.h});
+    });
+    s.free=out.filter((a,i)=>!out.some((c,j)=>j!==i&&a.x>=c.x&&a.y>=c.y&&a.x+a.w<=c.x+c.w&&a.y+a.h<=c.y+c.h&&(j<i||a.w!==c.w||a.h!==c.h||a.x!==c.x||a.y!==c.y)));
+    return true;
+  }
+  // the sheet of one table, as if it were cut from new sheets: whole sheets, the cheapest choice
+  function pSheets(t){
+    const K=PRICE.kerf, th=(+t.thickness||1.5)/1.5;
+    const types=PRICE.sheets.map(([W,H,p])=>({W:Math.max(W,H),H:Math.min(W,H),p})).filter(x=>x.W>0&&x.H>0);
+    const fitsAny=([w,h])=>types.some(x=>(w<=x.W&&h<=x.H)||(h<=x.W&&w<=x.H));
+    const pcs=pBlanks(t).filter(fitsAny).sort((a,b)=>b[0]*b[1]-a[0]*a[1]);
+    const big=pBlanks(t).filter(b=>!fitsAny(b));   // по-голяма от всеки лист — по площ
+    let best=null;
+    const n=pcs.length, combos=Math.pow(types.length, n);
+    for(let c=0;c<combos;c++){
+      const seq=[]; let v=c; for(let i=0;i<n;i++){ seq.push(types[v%types.length]); v=Math.floor(v/types.length); }
+      const sheets=[]; let ok=true;
+      for(const [w,h] of pcs){
+        if(sheets.some(s=>pPut(s,w+K,h+K))) continue;
+        const ty=seq[sheets.length], s={ty,free:[{x:0,y:0,w:ty.W+K,h:ty.H+K}]};
+        if(!pPut(s,w+K,h+K)){ ok=false; break; }
+        sheets.push(s);
+      }
+      if(!ok) continue;
+      const cost=sheets.reduce((a,s)=>a+s.ty.p,0);
+      if(!best||cost<best.cost) best={cost,list:sheets.map(s=>s.ty.W+"×"+s.ty.H)};
+    }
+    const bigCost=big.reduce((a,[w,h])=>a+w*h/1e6*PRICE.sheetM2,0);
+    return { cost:((best?best.cost:0)+bigCost)*th, sheets:best?best.list:[], count:best?best.list.length:0 };
   }
   const pTubeM = t => tableGeo(t,PRICE).legs.reduce((a,l)=>a+Math.max(0,l),0)/1000;
   function priceParts(t){
-    const mat=pBlankM2(t)*PRICE.sheetM2, tube=pTubeM(t)*PRICE.tubeM,
+    const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM,
           weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
     const caps=4*PRICE.capEach;   // тапички на краката — към цената, без надценка
     return { mat, tube, weld, bend, caps, base:mat+tube+weld+bend };
@@ -1029,7 +1078,8 @@
 
     /* ---- price of the order ----
        Cost (себестойност) = materials + labour, from the same formula as the client price:
-         materials: sheet by the area of the blanks (€/м²), tube by length, leg caps; labour: welds + bends.
+         materials: each table as if cut from NEW whole sheets (pSheets — the offcut is not taken off), a designer part by
+         its area (€/м²), tube by length, leg caps; labour: welds + bends. The cutting plan itself still uses the offcuts.
        Client price = cost × (1 + markupPct) → the profit is always markupPct of the cost.
        The whole sheets to buy are shown apart: what is left of them goes to the offcut store. */
     let matOurs = 0, tubeOurs = 0, weldOurs = 0, bendOurs = 0, capsOurs = 0;
@@ -1265,7 +1315,7 @@
     let h = '<h2>' + (proc ? 'Цена, доставка и архивиране' : 'Цена и потвърждение') + '</h2>' +
       '<div class="pricebox procbox">' +
         '<div class="big"><span>Цена за клиента</span><b>' + esc(eur2(P.client)) + '</b></div>' +
-        '<div><span>Материали (лист по площ + тръба)</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
+        '<div><span>Материали (маси: цели нови листове · детайли: по площ · тръба)</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
         '<div><span>Тапички на краката</span><b>' + esc(eur2(P.caps)) + '</b></div>' +
         '<div><span>Труд: заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
         '<div><span>Труд: огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
