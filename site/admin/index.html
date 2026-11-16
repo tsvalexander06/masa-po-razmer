@@ -58,6 +58,8 @@
   table.cut tr.sheet td:first-child{border-left:4px solid #60a5fa}
   table.cut tr.tube td:first-child{border-left:4px solid #a78bfa}
   table.cut tr.hw td:first-child{border-left:4px solid #cbd5e1}
+  .palviews{display:grid;grid-template-columns:1.2fr 1fr;gap:12px;margin:10px 0;align-items:start} @media (max-width:760px){ .palviews{grid-template-columns:1fr} }
+  .palcard{break-inside:avoid}
   .totals{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
   .tot{background:var(--soft);border:1px solid #c7d8f2;border-radius:10px;padding:10px 12px}
   .tot .k{font-size:12px;color:var(--muted);font-weight:600}
@@ -234,6 +236,7 @@
   <div class="mh">Меню</div>
   <button class="menuItem" data-go="work" type="button">Разкрой <span class="badge" id="cntWork"></span></button>
   <button class="menuItem" data-go="processing" type="button">В обработка <span class="badge" id="cntProc"></span></button>
+  <button class="menuItem" data-go="pallets" type="button">Палети</button>
   <button class="menuItem" data-go="designer" type="button">Конструктор</button>
   <button class="menuItem" data-go="archive" type="button">Архив</button>
   <button class="menuItem" data-go="stock" type="button">Фира — склад</button>
@@ -274,6 +277,20 @@
       <div class="status" id="procStatus"></div>
     </div>
     <div id="procHost"></div>
+  </section>
+
+  <section class="page" data-page="pallets" hidden>
+    <div class="card noprint">
+      <h2>Палети</h2>
+      <div class="muted">Отметнете поръчките, които тръгват заедно. Програмата смята теглото и габарита на всяка маса, детайл и елемент, слага по-малките вътре в по-големите маси (между краката, над долния плот) и подрежда останалото на възможно най-малко палети.</div>
+      <div id="palOrders" style="margin-top:10px"></div>
+      <details style="margin-top:10px"><summary><b>Палети и ограничения</b></summary><div class="grid" id="palSettings" style="margin-top:8px"></div></details>
+      <div class="row">
+        <button class="btn primary" id="palRun" type="button">Подреди на палети</button>
+        <button class="btn" id="palPrint" type="button">Печат</button>
+      </div>
+    </div>
+    <div id="palResult"></div>
   </section>
 
   <section class="page" data-page="stock" hidden>
@@ -339,7 +356,7 @@
       <label>Телефон<input type="text" id="snd-phone" placeholder="08XX XXX XXX"></label>
       <label>Населено място<input type="text" id="snd-city"></label>
       <label>Адрес<input type="text" id="snd-addr" placeholder="улица, №"></label>
-      <label>Цена за доставка от<select id="snd-mode"><option value="demo">тарифата на Еконт (тестов профил)</option><option value="own">моя e-Econt профил</option></select></label>
+      <label hidden>Цена за доставка от<select id="snd-mode"><option value="demo">тарифата на Еконт (тестов профил)</option><option value="own">моя e-Econt профил</option></select></label>
     </div>
   </div>
   <div class="card noprint">
