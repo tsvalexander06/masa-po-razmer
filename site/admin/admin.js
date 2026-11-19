@@ -577,7 +577,7 @@
       const note = (x, y, txt) => out.push('<text x="' + X(x) + '" y="' + Y(y) + '" font-size="11" fill="#7c3aed" font-weight="600" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>');
       draw({ rect, hdim, vdim, note, X, Y, S1, S2, S3, floor:+Y(0), k, VW, padL, padR });
       out.unshift('<line x1="' + (padL - 30) + '" y1="' + Y(0) + '" x2="' + (VW - padR + 30) + '" y2="' + Y(0) + '" stroke="#94a3b8" stroke-width="2"/>');
-      return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="width:100%;max-width:' + Math.round(VW * 0.8) + 'px;height:auto;background:#fff">' +
+      return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="width:100%;max-width:' + Math.round(Math.min(VW * 0.8, VW * 360 / VH)) + 'px;height:auto;background:#fff">' +
         '<defs><marker id="ar" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,2 L5,5 L0,8" fill="none" stroke="#1552c7" stroke-width="1.5"/></marker></defs>' +
         out.join("") + '</svg><figcaption>' + esc(title) + '</figcaption></figure>';
     }
@@ -1296,6 +1296,8 @@
         (deliveryText(o.delivery) ? '<br>Доставка: <b>' + esc(deliveryText(o.delivery)) + '</b>' : '') + '</div>' +
       '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
 
+    // the document has two parts for two people: 1) drawings with the sizes (assembly), 2) cutting and bending
+    const hHead = h; let hDraw = ''; h = '';
     // materials for the whole order
     const what = [nTables ? nTables + (nTables === 1 ? ' маса' : ' маси') : '', nParts ? nParts + (nParts === 1 ? ' детайл' : ' детайла') : ''].filter(Boolean).join(', ') || 'празна';
     h += '<div class="card summary"><h2>Материали за цялата поръчка (' + what + ')</h2><div class="totals">';
@@ -1331,7 +1333,7 @@
     // one card per table: what it is, what to cut, how to fold
     per.forEach((r, i) => {
       const t = o.tables[i], q = t.qty;
-      h += '<div class="card"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
+      hDraw += '<div class="card"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
         '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
         ' · борд: ' + (t.splashOn ? t.splashH + ' мм' + (r.geo.hem ? ' + подгъвка ' + r.geo.hem + ' мм ' + (r.geo.hemDir === 'front' ? 'напред' : 'към стената') +
           (r.geo.hemIn ? ' (в дълбочината; плот ' + fmt(r.geo.Dp) + ' мм)' : r.geo.hemDir === 'legacy' ? ' (извън дълбочината — стара поръчка)' : '') : '') : 'НЕ') +
@@ -1347,27 +1349,30 @@
         ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
         (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '') + '</div>' +
         r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
+        '<div class="draw3d">' + table3dSvg(t) + '</div>' +
+        '<h3>Размери — изглед отпред и отстрани</h3>' + tableViews(t) + '</div>';
+      h += '<div class="card"><h2>Маса ' + (i + 1) + ' — разкрой и сгъвки' + (q > 1 ? ' (' + q + ' бр. еднакви)' : '') + '</h2>' +
+        '<div class="printsum"><b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' + (r.geo.frame ? ' · рамка от профил, плотовете — тави отгоре' : '') + '</div>' +
         '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
-        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th></tr></thead><tbody>' +
         r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
-          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") +
+          '</td><td class="q">' + (x.qty * q) + '</td></tr>').join("") +
         '</tbody></table></div>' +
-        '<h3>Размери — изглед отпред и отстрани</h3>' + tableViews(t) +
         '<h3>Схема на огъванията</h3><div class="schemes">' + r.schemes.map(foldSvg).join("") + '</div></div>';
     });
 
     // one card per designed part: blank, bends from the edge, scheme
     parts.forEach((r, i) => {
       const p = r.p, q = p.qty;
-      if(r.first) h += asmCard(r.asm, r.ai);
+      if(r.first) hDraw += asmCard(r.asm, r.ai);
       h += '<div class="card"><h2>' + esc(r.tag + " · " + p.name) + (q > 1 ? ' — ' + q + ' бр.' : '') + '</h2><div class="printsum">' +
         '<b>дъно ' + fmt(p.L) + ' × ' + fmt(p.W) + ' мм</b> · лист ' + p.th + ' мм · брой: <b>' + q + '</b> · огъвания: ' + r.g.bends + ' · тегло ≈ ' + r.g.kg.toFixed(1) + ' кг/бр.' +
         (p.notes.trim() ? '<br><b>Бележка:</b> ' + esc(p.notes) : '') + '</div>' +
         r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
         '<h3>Детайл за рязане' + (q > 1 ? ' — ' + q + ' бр.' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
-        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th></tr></thead><tbody>' +
         r.rows.map(x => '<tr class="' + x.kind + '"><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) +
-          '</td><td class="q">' + (x.qty * q) + '</td><td>' + esc(x.note) + '</td></tr>').join("") + '</tbody></table></div>' +
+          '</td><td class="q">' + (x.qty * q) + '</td></tr>').join("") + '</tbody></table></div>' +
         (r.bendRows.length ? '<h3>Огъвания — линии от ръба на заготовката (мм)</h3><div class="tw"><table class="cut bends"><thead><tr><th>Страна</th><th>Профил (външни размери)</th><th>Линии на огъване от ръба</th></tr></thead><tbody>' +
           r.bendRows.map(b => '<tr><td>' + esc(b.side) + '</td><td>' + esc(b.profile) + '</td><td class="size">' + esc(b.lines) + '</td></tr>').join("") + '</tbody></table></div>' : '') +
         '<h3>Схема</h3><div class="schemes">' + partSvg(p, r.g) + '</div></div>';
@@ -1387,8 +1392,17 @@
           b.cuts.map(c => '<div class="seg" style="flex:0 0 ' + (c.len / S.tubeStock * 100) + '%" title="' + esc(c.label + ' ' + fmt(c.len)) + '">' + fmt(c.len) + '</div>').join("") +
           '</div></div>').join("") + '</div>';
     }
-    $("printView").innerHTML = h;
+    $("printView").innerHTML = hHead +
+      (hDraw ? '<div class="docpart"><h2 class="parthead">1. Чертежи с размерите — за сглобяване</h2>' + hDraw + '</div>' : '') +
+      '<div class="docpart docpart2"><h2 class="parthead">' + (hDraw ? '2. ' : '') + 'Разкрой и сгъвки — за рязане и огъване</h2>' + h + '</div>';
     renderBar();
+  }
+  // the 3D drawing of a table as SVG text (the print view has no live <svg> per table)
+  function table3dSvg(t){
+    const el = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    el.setAttribute("viewBox", "0 0 560 420"); el.setAttribute("class", "draw"); el.setAttribute("font-family", "-apple-system,Segoe UI,Roboto,Arial,sans-serif");
+    drawBlueprint(Object.assign({}, t, { mid2H:mid2H(t) }), el, S);
+    return el.outerHTML;
   }
   function tot(k, v, d){ return '<div class="tot"><div class="k">' + esc(k) + '</div><div class="v">' + esc(v) + '</div><div class="d">' + esc(d) + '</div></div>'; }
   function sheetSvg(sh, title){
