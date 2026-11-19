@@ -50,6 +50,7 @@
   textarea{min-height:64px;resize:vertical;font-family:inherit}
   .spec{background:#0f2744;color:#e2e8f0;border-radius:10px;padding:14px;font-size:13px;
     white-space:pre-wrap;font-family:ui-monospace,Menlo,Consolas,monospace;line-height:1.6}
+  .promo-ok{color:#15803d;font-weight:700} .promo-bad{color:#b91c1c;font-weight:600}
   .btns{display:flex;flex-direction:column;gap:10px;margin-top:14px}
   .btn{display:flex;align-items:center;justify-content:center;gap:8px;padding:14px;border-radius:11px;
     font-size:16px;font-weight:700;border:none;cursor:pointer;text-decoration:none;color:#fff}
@@ -107,6 +108,9 @@
       <label id="dlvAddrLbl">Адрес за доставка</label>
       <input type="text" id="dlvAddr" placeholder="улица, №, вход, етаж" autocomplete="street-address">
     </div>
+    <label>Промокод <span class="hint">(по избор)</span></label>
+    <input type="text" id="promo" placeholder="напр. код за отстъпка" autocomplete="off" autocapitalize="characters" spellcheck="false">
+    <p class="hint" id="promoMsg" aria-live="polite"></p>
   </div>
 
   <!-- summary + send -->

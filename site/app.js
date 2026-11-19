@@ -497,6 +497,7 @@
     if(nm) s+="Име:     "+nm+"\n";
     if(ph) s+="Телефон: "+ph+"\n";
     s+="Доставка: "+deliveryText(readDelivery())+"\n";
+    { const pc=promoOf($("promo").value); if(pc) s+="Промокод: "+pc.code+" (−"+pc.pct+"%)\n"; }
     const o=buildOrder();
     $("spec").textContent=s;
     renderPrice(o);
@@ -518,6 +519,13 @@
 
   $("name").addEventListener("input", renderAll);
   $("phone").addEventListener("input", renderAll);
+  // промокод: показва дали важи; цената се смята наново
+  function renderPromo(){
+    const v=$("promo").value.trim(), pc=promoOf(v), el=$("promoMsg");
+    el.textContent = !v ? "" : pc ? "✓ Отстъпка "+pc.pct+"% за цялата поръчка" : "Невалиден промокод";
+    el.className = "hint" + (v ? (pc ? " promo-ok" : " promo-bad") : "");
+  }
+  $("promo").addEventListener("input", ()=>{ renderPromo(); pdfCache=null; renderAll(); });
   /* ---------- доставка ---------- */
   const DLV = { address:"до адрес", office:"до офис на Еконт", pickup:"взимане от нас" };
   function readDelivery(){
@@ -549,7 +557,7 @@
     if(!newArmed){ newArmed=true; $("newOrder").textContent="Нова поръчка? Натиснете пак"; clearTimeout(newTimer); newTimer=setTimeout(resetNewBtn,4000); return; }
     clearTimeout(newTimer); resetNewBtn();
     tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
-    seq=0; $("name").value=""; $("phone").value=""; $("dlvType").value="address"; $("dlvCity").value=""; $("dlvAddr").value=""; renderDelivery(); ORDER_NO=genOrderNo();
+    seq=0; $("name").value=""; $("phone").value=""; $("promo").value=""; renderPromo(); $("dlvType").value="address"; $("dlvCity").value=""; $("dlvAddr").value=""; renderDelivery(); ORDER_NO=genOrderNo();
     priceShown=false; $("price").hidden=true; pdfCache=null; $("ok").textContent="";
     createTable();
     window.scrollTo({top:0, behavior:"smooth"});
@@ -690,7 +698,7 @@
   async function buildPdfBlob(){
     const {jsPDF}=window.jspdf;
     const o=buildOrder();
-    const meta={ priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)):"Цена: по запитване" };
+    const meta={ priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)+(o.price.promo?" (с отстъпка "+o.price.discountPct+"%, промокод "+o.price.promo+")":"")):"Цена: по запитване" };
     const cs=await allCanvases(meta);
     const doc=new jsPDF({unit:"mm",format:"a4",orientation:"portrait",compress:true});
     const maxW=190, maxH=277;
@@ -723,7 +731,9 @@
   // The whole order as data. Reads the current field values (does NOT call renderAll).
   // Price is derived here, so it always matches the order.
   function buildOrder(){
+    const pc=promoOf($("promo").value);
     const o={ v:1, orderNo:orderNumber(), name:$("name").value.trim(), phone:$("phone").value.trim(), delivery:readDelivery(), tables:tablesSnapshot() };
+    if(pc) o.promo=pc.code;
     o.price=priceFor(o);
     return o;
   }
@@ -817,8 +827,14 @@
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
     order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m;
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    const pc=promoOf(order.promo);
+    if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
+      return { total, currency:"€", lines, promo:pc.code, discountPct:pc.pct, discount:d }; }
     return { total, currency:"€", lines };
   }
+  // промокодове (без значение главни/малки букви) → отстъпка % върху цялата поръчка
+  const PROMOS = { INOX15:15 };
+  function promoOf(code){ const c=String(code||"").trim().toUpperCase(); return PROMOS[c] ? { code:c, pct:PROMOS[c] } : null; }
 
   /* Tamper-evidence signature over the order (HMAC-SHA256).
      ВАЖНО: ключът е в кода на страницата, затова това доказва промяна, но не е
@@ -826,7 +842,7 @@
      и да сравни с подписа — подменена цена просто се игнорира. */
   const ORDER_SECRET = "kv-mpr-sign-2026-v1";
   function canonicalOrder(d){
-    return JSON.stringify({ v:d.v, orderNo:d.orderNo, name:d.name, phone:d.phone, delivery:d.delivery, created:d.created, tables:d.tables, price:d.price });
+    return JSON.stringify({ v:d.v, orderNo:d.orderNo, name:d.name, phone:d.phone, delivery:d.delivery, promo:d.promo, created:d.created, tables:d.tables, price:d.price });
   }
   async function signOrder(d){
     try{

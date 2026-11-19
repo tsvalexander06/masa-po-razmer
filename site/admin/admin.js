@@ -192,8 +192,14 @@
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
     order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m;
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    const pc=promoOf(order.promo);
+    if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
+      return { total, currency:"€", lines, promo:pc.code, discountPct:pc.pct, discount:d }; }
     return { total, currency:"€", lines };
   }
+  // промокодове (без значение главни/малки букви) → отстъпка % върху цялата поръчка
+  const PROMOS = { INOX15:15 };
+  function promoOf(code){ const c=String(code||"").trim().toUpperCase(); return PROMOS[c] ? { code:c, pct:PROMOS[c] } : null; }
   const eur2 = v => (v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €");
   let PRICING = null; // latest computed pricing for the loaded order (set in recompute)
 
@@ -290,7 +296,7 @@
     const delivery = d.delivery ? normDelivery(d.delivery) : null;
     return { id:newId(), stage:"new", serial:null, addedAt:new Date().toISOString(),
       name:d.name || "", phone:d.phone || "", created:d.created || "", source:source || "", orderNo:d.orderNo || "",
-      priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : [{ hemDir:"wall" }]).map(normTable),
+      promo:(promoOf(d.promo) || {}).code || "", priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : [{ hemDir:"wall" }]).map(normTable),
       hasDoc:false, docName:"", cut:null, clientPrice:null, cost:null, costMaterials:null, price:null, place:"", deliveryDate:"", delivery };
   }
   async function readOrderFile(file){
@@ -386,7 +392,8 @@
       (o.phone ? ' · ' + esc(o.phone) : '') + ' <span class="stage st-' + o.stage + '">' + esc(STAGES[o.stage]) + '</span></div>' +
       '<div class="muted">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена") + (o.addedAt ? " · заредена " + esc(fmtDT(o.addedAt)) : "") +
       (o.confirmedAt ? " · потвърдена " + esc(fmtDT(o.confirmedAt)) : "") + '</div>' +
-      (deliveryText(o.delivery) ? '<div class="muted"><b>Доставка:</b> ' + esc(deliveryText(o.delivery)) + '</div>' : '');
+      (deliveryText(o.delivery) ? '<div class="muted"><b>Доставка:</b> ' + esc(deliveryText(o.delivery)) + '</div>' : '') +
+      (promoOf(o.promo) ? '<div class="muted"><b>Промокод:</b> ' + esc(promoOf(o.promo).code) + ' — отстъпка ' + promoOf(o.promo).pct + '%</div>' : '');
     $("vDoc").hidden = !o.hasDoc;
   }
   // after any change to the open order: keep it, refresh the lists and the title
@@ -416,6 +423,7 @@
       (ro ? '<div class="note" style="margin:0 0 12px">Разкроят е потвърден, затова полетата са заключени. За промяна на размерите натиснете „Върни в Разкрой“ най-долу.</div>' : '') +
       '<div class="grid"><label>Име<input type="text" id="o-name" value="' + esc(o.name) + '"' + dis + '></label>' +
       '<label>Телефон<input type="text" id="o-phone" value="' + esc(o.phone) + '"' + dis + '></label>' +
+      '<label>Промокод <span class="u" id="o-promoMsg">' + esc(promoOf(o.promo) ? "−" + promoOf(o.promo).pct + "%" : "") + '</span><input type="text" id="o-promo" value="' + esc(o.promo || "") + '"' + dis + '></label>' +
       '<label>Доставка<select id="o-dlvType"' + dis + '>' + Object.keys(DLV).map(k => '<option value="' + k + '"' + ((o.delivery ? o.delivery.type : "address") === k ? " selected" : "") + '>' + DLV[k] + '</option>').join("") + '</select></label>' +
       '<label>Населено място<input type="text" id="o-dlvCity" value="' + esc(o.delivery ? o.delivery.city : "") + '"' + dis + '></label>' +
       '<label>Адрес / офис на Еконт<input type="text" id="o-dlvAddr" value="' + esc(o.delivery ? o.delivery.address : "") + '"' + dis + '></label>' +
@@ -508,6 +516,8 @@
 
     $("o-name").addEventListener("input", e => { o.name = e.target.value; recompute(); edited(); });
     $("o-phone").addEventListener("input", e => { o.phone = e.target.value; recompute(); edited(); });
+    $("o-promo").addEventListener("input", e => { const pc = promoOf(e.target.value); o.promo = pc ? pc.code : e.target.value.trim();
+      $("o-promoMsg").textContent = pc ? "−" + pc.pct + "%" : e.target.value.trim() ? "невалиден" : ""; recompute(); edited(); });
     [["o-dlvType","type"],["o-dlvCity","city"],["o-dlvAddr","address"]].forEach(([id, k]) => $(id).addEventListener("input", e => {
       o.delivery = normDelivery(Object.assign({}, o.delivery, { [k]:e.target.value })); recompute(); edited(); }));
     $("addT").addEventListener("click", () => { o.tables.push(normTable({ hemDir:"wall" })); renderEdit(); recompute(); edited(); });
@@ -1281,6 +1291,7 @@
     const cr = fmtDT(o.created);
     let h = '<div class="card"><h2>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Поръчка — чака потвърждение на разкроя") + '</h2>' +
       '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b>' +
+        (promoOf(o.promo) ? ' · Промокод: <b>' + esc(promoOf(o.promo).code) + ' (−' + promoOf(o.promo).pct + '%)</b>' : '') +
         (nTables ? ' · Маси: <b>' + nTables + '</b>' : '') + (nParts ? ' · Детайли: <b>' + nParts + '</b>' : '') +
         (deliveryText(o.delivery) ? '<br>Доставка: <b>' + esc(deliveryText(o.delivery)) + '</b>' : '') + '</div>' +
       '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
@@ -1503,6 +1514,7 @@
     let h = '<h2>' + (proc ? 'Цена, доставка и архивиране' : 'Цена и потвърждение') + '</h2>' +
       '<div class="pricebox procbox">' +
         '<div class="big"><span>Цена за клиента</span><b>' + esc(eur2(P.client)) + '</b></div>' +
+        (promoOf(o.promo) ? '<div><span>Отстъпка ' + promoOf(o.promo).pct + '% (промокод ' + esc(promoOf(o.promo).code) + ') — включена</span><b>' + esc(eur2(P.client - orderGross(o))) + '</b></div>' : '') +
         '<div><span>Материали (маси: цели нови листове · детайли: по площ · тръба)</span><b>' + esc(eur2(P.costMaterials)) + '</b></div>' +
         '<div><span>Тапички на краката</span><b>' + esc(eur2(P.caps)) + '</b></div>' +
         '<div><span>Труд: заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
@@ -2399,12 +2411,15 @@
     const g = partGeo(p);
     return (Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) + g.bends * PRICE.bend) * (1 + PRICE.markupPct / 100) * p.qty;
   }
-  function orderClientPrice(o){
+  // цената преди отстъпката (маси + детайли + елементи)
+  function orderGross(o){
     const t = (o.tables && o.tables.length) ? priceFor({ tables:o.tables.map(normTable) }) : null;
     const parts = (o.parts || []).map(normPart).reduce((a, p) => a + partPrice(p), 0);
     const asms = (o.assemblies || []).map(x => normAsm(x)).reduce((a, x) => a + asmPrice(x), 0);
     return (t ? t.total : 0) + parts + asms;
   }
+  // промокодът намалява цялата поръчка (същите кодове като в клиентската форма)
+  function orderClientPrice(o){ const g = orderGross(o), pc = promoOf(o.promo); return pc ? g * (1 - pc.pct / 100) : g; }
   // print card of an element: the assembled 3D view, its parts and the welds
   function asmCard(a, ai){
     const r = asmSvg(a, { yaw:-0.55, pitch:0.62 }, { tags:a.items.map((x, j) => asmTag(ai, j)), VW:720, VH:380 }), J = asmJoints(a);
