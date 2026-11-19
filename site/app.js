@@ -105,6 +105,11 @@
       </div>
       <label>Разстояние от предните до задните крака <span class="hint">(мм, външно; празно = стандартно)</span></label>
       <input type="number" class="f-legSpan" min="100" max="1200" step="1">
+      <label>Отстояние на краката от ръба отстрани <span class="hint">(мм, до външната страна на крака; празно = стандартно)</span></label>
+      <div class="row">
+        <div><span class="hint">От левия ръб</span><input type="number" class="f-sideL" min="1" max="1000" step="0.5"></div>
+        <div><span class="hint">От десния ръб</span><input type="number" class="f-sideR" min="1" max="1000" step="0.5"></div>
+      </div>
       <p class="hint f-spanInfo"></p>
       <label>Височина на всеки крак <span class="hint">(мм, ако крак стъпва на нещо; празно = стандартно; ляво/дясно гледано отпред)</span></label>
       <div class="row">
@@ -189,7 +194,7 @@
     const q = s => t.card.querySelector(s), n = s => +q(s).value || 0;
     const ret = x => Math.min(30, Math.max(12, Math.round(x || 12)));
     v.advOn = q('.f-advOn').checked;
-    ["topEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan"].concat(LEG_KEYS).forEach(k => v[k] = 0);
+    ["topEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan","sideL","sideR"].concat(LEG_KEYS).forEach(k => v[k] = 0);
     if(v.advOn){
       v.topEdge = n('.f-topEdge'); v.baseEdge = n('.f-baseEdge'); v.midEdge = n('.f-midEdge');
       v.topRet = ret(n('.f-topRet')); v.baseRet = ret(n('.f-baseRet')); v.midRet = ret(n('.f-midRet'));
@@ -198,6 +203,9 @@
       const auto = tableGeo(v, PRICE);
       const maxSpan = auto.Dp - auto.front - auto.minBack, sp = n('.f-legSpan');
       if(sp) v.legSpan = Math.round(Math.min(maxSpan, Math.max(100, sp)) * 10) / 10;
+      ["sideL","sideR"].forEach(k => { const x = n('.f-' + k);   // отстояние отляво / отдясно: остават поне 300 мм между краката
+        if(x) v[k] = Math.round(Math.min(Math.max(1, (v.L - 300) / 2), Math.max(1, x)) * 10) / 10;
+        if(v[k] === auto.sideStd) v[k] = 0; });
       LEG_KEYS.forEach(k => { const x = n('.f-' + k);
         if(x) v[k] = Math.round(Math.min(auto.legAuto, Math.max(50, x)) * 10) / 10;
         if(v[k] === auto.legAuto) v[k] = 0; });
@@ -210,6 +218,7 @@
     let s = "Челно лице: работен плот "+g.eT+" мм"+(v.baseOn?", долен плот "+g.eB+" мм":"")+(v.midOn?", втори междинен плот "+g.eM+" мм":"")+"\n";
     s += "Сгъвка навътре: работен плот "+g.rT+" мм"+(v.baseOn?", долен плот "+g.rB+" мм":"")+(v.midOn?", втори междинен плот "+g.rM+" мм":"")+"\n";
     if(v.legSpan) s += "Разстояние между предните и задните крака (външно): "+v.legSpan+" мм\n";
+    if(v.sideL || v.sideR) s += "Краката от ръба: отляво "+g.sideL+" мм, отдясно "+g.sideR+" мм (външно)\n";
     const legs = LEG_KEYS.map((k,i) => v[k] ? LEG_NAMES[i]+" "+v[k]+" мм" : "").filter(Boolean);
     if(legs.length) s += "Височина на краката: "+legs.join(", ")+" (останалите "+g.legAuto+" мм)\n";
     return s;
@@ -243,7 +252,8 @@
     const Dp = (+t.D || 0) - hemIn;                      // дълбочина на самия плот
     const dR = rT - D.topReturn;                       // по-дълга сгъвка на плота → краката навътре
     const front = D.shelfGap + dR;                     // предна страна на предните крака от предния ръб
-    const side = (D.shelfGapW + 2 * dR) / 2;           // външна страна на краката от страничния ръб
+    const sideStd = (D.shelfGapW + 2 * dR) / 2;        // външна страна на краката от страничния ръб (стандартно)
+    const sideL = num(t.sideL) || sideStd, sideR = num(t.sideR) || sideStd, side = sideL;   // отстояние отляво / отдясно
     const minBack = t.splashOn ? 0 : rT;               // без борд: зад сгъвката; с борд задът е свободен
     let back = t.splashOn ? 0 : Math.max(minBack, +t.legBack || 0);
     let span = Dp - front - back;
@@ -251,19 +261,19 @@
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
     const legs = LEG_KEYS.map(k => num(t[k]) || legAuto);
     // долните плотове: между крайните крака, или — при 6 крака — от крайните до средните (лява/дясна част)
-    const L = +t.L || 0, prof = +t.legProfile || 30, full = L - 2 * side, legs6 = !!t.legs6, right = t.shelfSide === "right";
-    let shL = full, shX = side, midX = null, bayAuto = 0;
+    const L = +t.L || 0, prof = +t.legProfile || 30, full = L - sideL - sideR, legs6 = !!t.legs6, right = t.shelfSide === "right";
+    let shL = full, shX = sideL, midX = null, bayAuto = 0;
     if(legs6){
-      bayAuto = Math.round((L / 2 + prof / 2 - side) * 10) / 10;
+      bayAuto = Math.round((L / 2 + prof / 2 - (right ? sideR : sideL)) * 10) / 10;
       shL = Math.min(full - prof - 50, Math.max(2 * prof + 100, num(t.bayL) || bayAuto));
-      shX = right ? L - side - shL : side;
-      midX = right ? shX : side + shL - prof;          // лявата страна на средните крака
+      shX = right ? L - sideR - shL : sideL;
+      midX = right ? shX : sideL + shL - prof;         // лявата страна на средните крака
     }
     // профилите в празната част (само при 6 крака): x0..x1 = светлото между средния и крайния крак
     const rails = legs6 && !!t.rails, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || 100));
-    const railX0 = legs6 ? (right ? side + prof : side + shL) : 0, railX1 = legs6 ? (right ? shX : L - side - prof) : 0;
-    const railXs = legs6 ? (right ? [side, midX] : [midX, L - side - prof]) : [];
-    return { eT, eB, eM, rT, rB, rM, hemDir, hem, hemIn, Dp, front, side, back, minBack, span, shL, shD:span, shX, full, legAuto, legs,
+    const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : 0;
+    const railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : [];
+    return { eT, eB, eM, rT, rB, rM, hemDir, hem, hemIn, Dp, front, side, sideL, sideR, sideStd, back, minBack, span, shL, shD:span, shX, full, legAuto, legs,
              legs6, right, midX, bayAuto, nLegs:legs6 ? 6 : 4, prof,
              rails, railH, railX0, railX1, railLen:rails ? Math.max(0, railX1 - railX0) : 0, railD:rails ? Math.max(0, span - 2 * prof) : 0, railXs };
   }
@@ -293,7 +303,7 @@
     const B2='url(#gT2)',B2F='url(#gF2)',B2R='url(#gR2)';
 
     // legs sit at the outline of the lower shelves
-    const x0=g.side/1000, x1=w-g.side/1000, z0=Math.max(0,g.back/1000), z1=d-g.front/1000;
+    const x0=g.sideL/1000, x1=w-g.sideR/1000, z0=Math.max(0,g.back/1000), z1=d-g.front/1000;
     const lxL=x0, lxR=Math.max(x0,x1-lg), backZ=z0, frontZ=Math.max(z0,z1-lg);
     const shelf=(yy,th)=>box(g.shX/1000,yy,z0, Math.max(0.01,g.shL/1000), th, Math.max(0.01,z1-z0), B2,B2F,B2R);
     const midLeg=z=>{ if(g.legs6) box(g.midX/1000,0,z,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT); };   // средният чифт крака
@@ -345,6 +355,9 @@
         [[P(x1,0,backZ),P(sx,0,backZ)],[P(x1,0,z1),P(sx,0,z1)]]);
       shapes.push({t:'cap',p:P(sx,0,(backZ+z1)/2),txt:'между краката',dx:10,dy:14});
     }
+    if(g.sideL!==g.sideStd||g.sideR!==g.sideStd){ const zz=d+off*0.45;   // зададено отстояние на краката отляво / отдясно
+      [[0,x0,Math.round(g.sideL*10)/10],[x1,w,Math.round(g.sideR*10)/10]].forEach(([a,b,v])=>{
+        dim(P(a,0,zz),P(b,0,zz),P((a+b)/2,0,zz),v+'','middle',0,16,[[P(a,0,d),P(a,0,zz)],[P(b,0,z1+lg),P(b,0,zz)]]); }); }
     if(g.legs6){ const a=g.shX/1000, b=(g.shX+g.shL)/1000, zz=d+off*0.45;   // 6 крака: от крайните до средните крака (външно)
       dim(P(a,0,zz),P(b,0,zz),P((a+b)/2,0,zz),Math.round(g.shL*10)/10+'','middle',0,16,[[P(a,0,z1+lg),P(a,0,zz)],[P(b,0,z1+lg),P(b,0,zz)]]);
       shapes.push({t:'cap',p:P((a+b)/2,0,zz),txt:'до средните крака',dx:-40,dy:30});
@@ -415,6 +428,7 @@
       ? "Задните крака ще са на " + Math.round(g.back * 10) / 10 + " мм от задния ръб" + (v.splashOn ? " (борд)" : "") + "; долните плотове ще са дълбоки " + v.legSpan + " мм. Най-много " + Math.round((g.Dp - g.front - g.minBack) * 10) / 10 + " мм."
       : "";
     LEG_KEYS.forEach(k => q('.f-' + k).placeholder = String(g.legAuto));
+    q('.f-sideL').placeholder = q('.f-sideR').placeholder = "стандартно " + g.sideStd;
     const raised = LEG_KEYS.map((k, i) => v[k] ? LEG_NAMES[i] + ": " + v[k] + " мм — стъпва на " + Math.round((g.legAuto - v[k]) * 10) / 10 + " мм" : "").filter(Boolean);
     q('.f-legInfo').textContent = raised.length ? raised.join("; ") + ". Плотът остава хоризонтален на " + v.H + " мм." : "";
   }
@@ -676,7 +690,7 @@
         baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes,
         advOn:v.advOn, topEdge:v.topEdge, baseEdge:v.baseEdge, midEdge:v.midEdge, topRet:v.topRet, baseRet:v.baseRet, midRet:v.midRet,
         legSpan:v.legSpan, legFL:v.legFL, legFR:v.legFR, legBL:v.legBL, legBR:v.legBR,
-        legs6:v.legs6, shelfSide:v.shelfSide, bayL:v.bayL, rails:v.rails, railH:v.railH };
+        legs6:v.legs6, shelfSide:v.shelfSide, bayL:v.bayL, rails:v.rails, railH:v.railH, sideL:v.sideL, sideR:v.sideR };
     });
   }
   // The whole order as data. Reads the current field values (does NOT call renderAll).
