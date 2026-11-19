@@ -505,6 +505,7 @@
 
   function renderPrice(o){
     const box=$("price");
+    $("promoBox").hidden=!priceShown;   // промокодът — под цената, след „Калкулирай цена“
     if(!priceShown){ box.hidden=true; return; }
     box.hidden=false;
     const p=o&&o.price;
@@ -512,9 +513,9 @@
       box.innerHTML='<div class="pmsg">Автоматичната цена ще бъде добавена скоро. Изпратете поръчката и ще се свържем с вас за потвърждение и цена.</div>';
       return;
     }
-    box.innerHTML='<div class="plabel">Ориентировъчна цена</div><div class="pbig">'+esc(fmtMoney(p.total))+'</div>'+
+    box.innerHTML='<div class="pbig">'+esc(fmtMoney(p.total))+'</div>'+
       (p.lines&&p.lines.length?'<div class="plines">'+p.lines.map(l=>'<div><span>'+esc(l.label)+'</span><b>'+esc(fmtMoney(l.amount))+'</b></div>').join("")+'</div>':'')+
-      '<div class="pnote">Цената е ориентировъчна и се потвърждава от нас.</div>';
+      '<div class="pnote">Цената се потвърждава от нас.</div>';
   }
 
   $("name").addEventListener("input", renderAll);
@@ -558,7 +559,7 @@
     clearTimeout(newTimer); resetNewBtn();
     tables.slice().forEach(t=>{ const i=tables.indexOf(t); if(i>=0) tables.splice(i,1); t.card.remove(); });
     seq=0; $("name").value=""; $("phone").value=""; $("promo").value=""; renderPromo(); $("dlvType").value="address"; $("dlvCity").value=""; $("dlvAddr").value=""; renderDelivery(); ORDER_NO=genOrderNo();
-    priceShown=false; $("price").hidden=true; pdfCache=null; $("ok").textContent="";
+    priceShown=false; $("price").hidden=true; $("promoBox").hidden=true; pdfCache=null; $("ok").textContent="";
     createTable();
     window.scrollTo({top:0, behavior:"smooth"});
   });
@@ -698,7 +699,7 @@
   async function buildPdfBlob(){
     const {jsPDF}=window.jspdf;
     const o=buildOrder();
-    const meta={ priceText:o.price?("Ориентировъчна цена: "+fmtMoney(o.price.total)+(o.price.promo?" (с отстъпка "+o.price.discountPct+"%, промокод "+o.price.promo+")":"")):"Цена: по запитване" };
+    const meta={ priceText:o.price?("Цена: "+fmtMoney(o.price.total)+(o.price.promo?" (с отстъпка "+o.price.discountPct+"%, промокод "+o.price.promo+")":"")):"Цена: по запитване" };
     const cs=await allCanvases(meta);
     const doc=new jsPDF({unit:"mm",format:"a4",orientation:"portrait",compress:true});
     const maxW=190, maxH=277;
