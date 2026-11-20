@@ -550,14 +550,14 @@
      Отпред: дължината, отстоянието на краката от ръба, между краката (и до средните), височини на
      плотовете, светло между долния и работния плот, профилите. Отстрани: дълбочината, предни/задни крака,
      борд и подгъвка, профилите. Всичко в мм. */
-  function tableViews(t){
+  function tableViews(t, split){
     const g = tableGeo(t, S), th = +t.thickness || 1.5, prof = g.prof, H = +t.H || 0, L = +t.L || 0;
     const base = t.baseOn ? +t.baseH || 0 : 0, mid = t.midOn ? mid2H(t) : 0, spl = t.splashOn ? +t.splashH || 0 : 0;
     const topU = H - g.eT;                          // долният ръб на челната дъска
     const r1 = n => String(Math.round(n * 10) / 10);
     function view(W, Hh, draw, title){
-      const padL = 230, padR = 250, padT = 40, padB = 140;
-      const k = Math.min((1200 - padL - padR) / Math.max(1, W), 520 / Math.max(1, Hh + spl)), VW = Math.round(W * k + padL + padR);
+      const padL = 290, padR = 70, padT = 40, padB = 140;
+      const k = Math.min((1200 - padL - padR) / Math.max(1, W), 600 / Math.max(1, Hh + spl)), VW = Math.round(W * k + padL + padR);
       const VH = Math.round((Hh + spl) * k + padT + padB);
       const X = x => (padL + x * k).toFixed(1), Y = y => (padT + (Hh + spl - y) * k).toFixed(1);
       const out = [];
@@ -568,13 +568,13 @@
         const x1 = +X(a), x2 = +X(b);
         out.push('<line x1="' + x1 + '" y1="' + py + '" x2="' + x2 + '" y2="' + py + '" stroke="#1552c7" stroke-width="1.2" marker-start="url(#ar)" marker-end="url(#ar)"/>' +
           '<line x1="' + x1 + '" y1="' + (py - 8) + '" x2="' + x1 + '" y2="' + (py + 8) + '" stroke="#1552c7"/><line x1="' + x2 + '" y1="' + (py - 8) + '" x2="' + x2 + '" y2="' + (py + 8) + '" stroke="#1552c7"/>' +
-          '<text x="' + ((x1 + x2) / 2).toFixed(1) + '" y="' + (py - 5) + '" text-anchor="middle" font-size="' + (small ? 12 : 14) + '" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>'); };
+          '<text x="' + ((x1 + x2) / 2).toFixed(1) + '" y="' + (py - 5) + '" text-anchor="middle" font-size="' + (small ? 14 : 17) + '" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>'); };
       const vdim = (a, b, px, txt, side) => { if(Math.abs(b - a) < 0.5) return;
         const y1 = +Y(a), y2 = +Y(b);
         out.push('<line x1="' + px + '" y1="' + y1 + '" x2="' + px + '" y2="' + y2 + '" stroke="#1552c7" stroke-width="1.2" marker-start="url(#ar)" marker-end="url(#ar)"/>' +
           '<line x1="' + (px - 8) + '" y1="' + y1 + '" x2="' + (px + 8) + '" y2="' + y1 + '" stroke="#1552c7"/><line x1="' + (px - 8) + '" y1="' + y2 + '" x2="' + (px + 8) + '" y2="' + y2 + '" stroke="#1552c7"/>' +
-          '<text x="' + (px + (side < 0 ? -6 : 6)) + '" y="' + ((y1 + y2) / 2 + 4).toFixed(1) + '" text-anchor="' + (side < 0 ? "end" : "start") + '" font-size="13" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>'); };
-      const note = (x, y, txt) => out.push('<text x="' + X(x) + '" y="' + Y(y) + '" font-size="11" fill="#7c3aed" font-weight="600" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>');
+          '<text x="' + (px + (side < 0 ? -6 : 6)) + '" y="' + ((y1 + y2) / 2 + 4).toFixed(1) + '" text-anchor="' + (side < 0 ? "end" : "start") + '" font-size="16" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>'); };
+      const note = (x, y, txt) => out.push('<text x="' + X(x) + '" y="' + Y(y) + '" font-size="14" fill="#7c3aed" font-weight="600" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>');
       draw({ rect, hdim, vdim, note, X, Y, S1, S2, S3, floor:+Y(0), k, VW, padL, padR });
       out.unshift('<line x1="' + (padL - 30) + '" y1="' + Y(0) + '" x2="' + (VW - padR + 30) + '" y2="' + Y(0) + '" stroke="#94a3b8" stroke-width="2"/>');
       return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="width:100%;max-width:' + Math.round(Math.min(VW * 0.8, VW * 360 / VH)) + 'px;height:auto;background:#fff">' +
@@ -634,9 +634,9 @@
       if(spl) d.vdim(H, H + spl, d.padL - 110, spl + " борд", -1);
       if(t.baseOn) d.vdim(0, base, d.padL - 24, base + " долен плот", -1);
       if(g.rails) d.vdim(0, g.railH, +d.X(g.front + g.span / 2), r1(g.railH) + " профил", 1);
-      d.note(0, H + spl + 8, "предни крака на " + r1(g.front) + " мм от предния ръб · задни на " + r1(g.back) + " мм от задния" + (g.hem ? " · подгъвка " + g.hem + " мм" : ""));
+      d.note(0, H + spl + 8, "крака: " + r1(g.front) + " мм отпред, " + r1(g.back) + " мм отзад");
     }, "Изглед отстрани — отпред е вляво, стената вдясно");
-    return '<div class="views2">' + front + side + '</div>';
+    return split ? { front, side } : '<div class="views2">' + front + side + '</div>';
   }
   function drawTable(i){
     const card = document.querySelector('#order .tbl[data-i="' + i + '"]'); if(!card) return;
@@ -1333,7 +1333,8 @@
     // one card per table: what it is, what to cut, how to fold
     per.forEach((r, i) => {
       const t = o.tables[i], q = t.qty;
-      hDraw += '<div class="card"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
+      const tv = tableViews(t, true);
+      hDraw += '<div class="card tdraw"><h2>Маса ' + (i + 1) + (q > 1 ? ' — ' + q + ' бр. еднакви' : '') + '</h2><div class="printsum">' +
         '<b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' +
         ' · борд: ' + (t.splashOn ? t.splashH + ' мм' + (r.geo.hem ? ' + подгъвка ' + r.geo.hem + ' мм ' + (r.geo.hemDir === 'front' ? 'напред' : 'към стената') +
           (r.geo.hemIn ? ' (в дълбочината; плот ' + fmt(r.geo.Dp) + ' мм)' : r.geo.hemDir === 'legacy' ? ' (извън дълбочината — стара поръчка)' : '') : '') : 'НЕ') +
@@ -1349,9 +1350,9 @@
         ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
         (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '') + '</div>' +
         r.warns.map(w => '<div class="warnbox">⚠ ' + esc(w) + '</div>').join("") +
-        '<div class="draw3d">' + table3dSvg(t) + '</div>' +
-        '<h3>Размери — изглед отпред и отстрани</h3>' + tableViews(t) + '</div>';
-      h += '<div class="card"><h2>Маса ' + (i + 1) + ' — разкрой и сгъвки' + (q > 1 ? ' (' + q + ' бр. еднакви)' : '') + '</h2>' +
+        '<div class="drawgrid"><div class="draw3d">' + table3dSvg(t) + '</div><div class="dside">' + tv.side + '</div></div>' +
+        '<div class="dfront">' + tv.front + '</div></div>';
+      h += '<div class="card tcut"><h2>Маса ' + (i + 1) + ' — разкрой и сгъвки' + (q > 1 ? ' (' + q + ' бр. еднакви)' : '') + '</h2>' +
         '<div class="printsum"><b>' + t.L + ' × ' + t.D + ' × ' + t.H + ' мм</b> · брой: <b>' + q + '</b>' + (r.geo.frame ? ' · рамка от профил, плотовете — тави отгоре' : '') + '</div>' +
         '<h3>Детайли за рязане' + (q > 1 ? ' — за ' + q + ' маси' : '') + '</h3><div class="tw"><table class="cut"><thead><tr>' +
         '<th>Детайл</th><th>Материал</th><th>Размер за рязане (мм)</th><th>Бр.</th></tr></thead><tbody>' +

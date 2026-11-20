@@ -156,7 +156,20 @@
   .hemctl label{flex:1 1 170px}
   .parthead{margin:18px 0 10px;font-size:17px;color:var(--brand-dark,#1552c7);border-bottom:2px solid #1E6FF4;padding-bottom:6px}
   .draw3d svg{width:100%;max-width:560px;height:auto;display:block;margin:8px auto 0}
-  @media print{ .docpart2{break-before:page} .parthead{margin-top:0} .views2 .scheme,.draw3d{break-inside:avoid} .draw3d svg{max-width:420px} }
+  .drawgrid{display:grid;grid-template-columns:1.3fr 1fr;gap:12px;align-items:center;margin-top:8px}
+  .drawgrid .scheme,.dfront .scheme{margin:0} .drawgrid svg,.dfront svg{width:100%!important;max-width:none!important;height:auto;display:block}
+  .dfront{margin-top:10px}
+  @media screen and (max-width:800px){ .drawgrid{grid-template-columns:1fr} }
+  @media print{
+    .docpart2{break-before:page} .parthead{margin-top:0}
+    .tdraw,.tdraw .drawgrid,.tdraw .dfront,.draw3d,.views2 .scheme{break-inside:avoid}
+    .tdraw ~ .tdraw{break-before:page}                       /* всяка маса — на своя страница */
+    .tcut ~ .tcut{break-before:page}                         /* разкроят на всяка маса — на своя страница */
+    .card .tw{break-inside:avoid}                            /* таблиците за рязане не се разделят */
+    .drawgrid svg{max-height:98mm} .dfront svg{max-height:108mm}
+    .tdraw .scheme figcaption{font-size:12px}
+    .tdraw .printsum{font-size:13px}
+  }
   .views2{display:grid;grid-template-columns:1fr;gap:12px;max-width:1000px} .views2 .scheme{margin:0}
   .legs6ctl{display:flex;gap:10px;flex-wrap:wrap;width:100%;margin-top:8px} .legs6ctl label{flex:1 1 170px} .hemctl[hidden],.legs6ctl[hidden]{display:none}
   input:disabled,textarea:disabled{background:#f1f5f9;color:#475569}
