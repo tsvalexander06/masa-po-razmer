@@ -123,8 +123,8 @@
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
-  const pFloors = t => (t.frame ? tableGeo(t,PRICE).frameJoints/4 : (t.legs6?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0)) + (t.legs6&&t.rails?1.5:0);   // 1 етаж = 4 заварки; рамка: 2 на царга
-  const pBends  = t => t.frame ? (3 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):1)) + 4*((t.baseOn?1:0)+(t.midOn?1:0))   // тави: по 1 огъване на страна
+  const pFloors = t => (isFrame(t) ? tableGeo(t,PRICE).frameJoints/4 : (t.legs6?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0)) + (t.legs6&&t.rails?1.5:0);   // 1 етаж = 4 заварки; рамка: 2 на царга
+  const pBends  = t => isFrame(t) ? (3 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):1)) + 4*((t.baseOn?1:0)+(t.midOn?1:0))   // тави: по 1 огъване на страна
                                : (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   // заготовките на една маса (мм): плот и долните плотове
   function pBlanks(t){
@@ -253,7 +253,7 @@
     const s = JSON.stringify([o.name || "", o.phone || "", o.created || "", (o.tables || []).map(t =>
       [+t.qty || 1, +t.L || 0, +t.D || 0, +t.H || 0, !!t.splashOn, +t.splashH || 0, +t.legBack || 0, !!t.baseOn, +t.baseH || 0, !!t.midOn]
         .concat(["topEdge","shelfEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan","legFL","legFR","legBL","legBR","hem"].map(k => +t[k] || 0), [t.hemDir || ""],
-          +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], t.frame ? ["frame"] : [],
+          +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], isFrame(t) ? ["frame"] : [],
           t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0] : []))]);
     let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
     return h.toString(36) + s.length.toString(36);
@@ -440,7 +440,7 @@
           [["wall","към стената (в дълбочината)"],["front","напред"],["none","без"]].concat(!t.hemDir ? [["","към стената, извън дълбочината (стара поръчка)"]] : [])
             .map(([v,l]) => '<option value="' + v + '"' + ((t.hemDir || "") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
         '<label>Подгъвка <span class="u">(мм)</span><input type="number" min="0" step="1" data-k="hem" value="' + esc(+t.hem > 0 ? t.hem : "") + '"' + dis + '></label></span>' +
-        '<label class="chk"><input type="checkbox" data-k="frame"' + (t.frame ? " checked" : "") + dis + '> Рамка от профил, плотовете — тави отгоре (без сгъвка навътре)</label>' +
+        '<label class="chk"><input type="checkbox" data-k="frame"' + (isFrame(t) ? " checked" : "") + (dis || (t.legs6 ? " disabled" : "")) + '> Рамка от профил, плотовете — тави отгоре (без сгъвка навътре)</label>' +
         '<label class="chk"><input type="checkbox" data-k="legs6"' + (t.legs6 ? " checked" : "") + dis + '> 6 крака</label>' +
         '<span class="legs6ctl"><label>Долните плотове<select data-k="shelfSide"' + dis + '>' + [["left","в лявата част"],["right","в дясната част"]]
             .map(([v,l]) => '<option value="' + v + '"' + ((t.shelfSide || "left") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
@@ -649,7 +649,9 @@
     const lc = card.querySelector(".legs6ctl"); if(lc){ lc.hidden = !t.legs6; const bi = lc.querySelector('[data-k="bayL"]'); if(bi) bi.placeholder = "по средата " + tableGeo(t, S).bayAuto; }
     const hi = card.querySelector('[data-k="hem"]'); if(hi){ hi.placeholder = S.splashHem; hi.disabled = order.stage !== "new" || t.hemDir === "none"; }
     card.querySelectorAll('[data-adv="midEdge"],[data-adv="midRet"]').forEach(e => e.hidden = !t.midOn);
-    if(t.frame) card.querySelectorAll('[data-adv="topRet"],[data-adv="baseRet"],[data-adv="midRet"]').forEach(e => e.hidden = true);   // тави: без сгъвка навътре
+    const fc = card.querySelector('[data-k="frame"]');   // при 6 крака рамката е задължителна
+    if(fc){ fc.checked = isFrame(t); fc.disabled = order.stage !== "new" || !!t.legs6; fc.title = t.legs6 ? "Масата с 6 крака е винаги с рамка от профил" : ""; }
+    if(isFrame(t)) card.querySelectorAll('[data-adv="topRet"],[data-adv="baseRet"],[data-adv="midRet"]').forEach(e => e.hidden = true);   // тави: без сгъвка навътре
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
     // с борд задният ръб не опира в стената — отстоянието на задните крака не се ползва
     const lb = card.querySelector('[data-k="legBack"]');
@@ -676,13 +678,15 @@
        краката са на D.frameGap от ръба (рамката влиза в тавата), огъването е едно на страна → половината от
        намалението на заготовката (topCut/shelfCut). */
   const LEG_KEYS = ["legFL","legFR","legBL","legBR"];
+  // рамка от профил: избрана в админа, или винаги при маса с 6 крака
+  const isFrame = t => !!(t && (t.frame || t.legs6));
   const LEG_NAMES = ["преден ляв","преден десен","заден ляв","заден десен"];
   function tableGeo(t, D){
     const num = v => (+v > 0 ? +v : 0);
     const eT = num(t.topEdge) || D.topEdge;
     const eB = num(t.baseEdge) || num(t.shelfEdge) || D.shelfEdge;
     const eM = num(t.midEdge) || num(t.shelfEdge) || D.shelfEdge;
-    const frame = !!t.frame, fg = +D.frameGap || 2;
+    const frame = isFrame(t), fg = +D.frameGap || 2;
     const rT = frame ? 0 : num(t.topRet) || D.topReturn, rB = frame ? 0 : num(t.baseRet) || D.shelfReturn, rM = frame ? 0 : num(t.midRet) || D.shelfReturn;
     const hemDir = t.splashOn ? (t.hemDir === "wall" || t.hemDir === "front" || t.hemDir === "none" ? t.hemDir : "legacy") : "none";
     const hem = hemDir === "none" ? 0 : (num(t.hem) || +D.splashHem || 0);
