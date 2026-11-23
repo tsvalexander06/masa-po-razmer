@@ -115,6 +115,7 @@
   const PRICE = {
     sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
+    fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
     kerf: 3,            // мм между заготовките при рязане
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
@@ -168,14 +169,17 @@
       const seq=[]; let v=c; for(let i=0;i<n;i++){ seq.push(types[v%types.length]); v=Math.floor(v/types.length); }
       const sheets=[]; let ok=true;
       for(const [w,h] of pcs){
-        if(sheets.some(s=>pPut(s,w+K,h+K))) continue;
-        const ty=seq[sheets.length], s={ty,free:[{x:0,y:0,w:ty.W+K,h:ty.H+K}]};
+        const s0=sheets.find(s=>pPut(s,w+K,h+K));
+        if(s0){ s0.used+=w*h; continue; }
+        const ty=seq[sheets.length], s={ty,free:[{x:0,y:0,w:ty.W+K,h:ty.H+K}],used:w*h};
         if(!pPut(s,w+K,h+K)){ ok=false; break; }
         sheets.push(s);
       }
       if(!ok) continue;
-      const cost=sheets.reduce((a,s)=>a+s.ty.p,0);
-      if(!best||cost<best.cost) best={cost,list:sheets.map(s=>s.ty.W+"×"+s.ty.H)};
+      // повече от 2/3 от листа → цял лист; по-малко → само използваната ламарина (по цената на м² от този лист)
+      const sheetCost=s=>{ const f=s.used/(s.ty.W*s.ty.H); return f>PRICE.fullSheetAt ? s.ty.p : f*s.ty.p; };
+      const cost=sheets.reduce((a,s)=>a+sheetCost(s),0);
+      if(!best||cost<best.cost) best={cost,list:sheets.map(s=>s.ty.W+"×"+s.ty.H+(s.used/(s.ty.W*s.ty.H)>PRICE.fullSheetAt?"":" ("+Math.round(s.used/(s.ty.W*s.ty.H)*100)+"%)"))};
     }
     const bigCost=big.reduce((a,[w,h])=>a+w*h/1e6*PRICE.sheetM2,0);
     return { cost:((best?best.cost:0)+bigCost)*th, sheets:best?best.list:[], count:best?best.list.length:0 };
