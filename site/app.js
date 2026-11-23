@@ -315,6 +315,7 @@
     if(legs6){
       bayAuto = Math.round((L / 2 + prof / 2 - (right ? sideR : sideL)) * 10) / 10;
       shL = Math.min(full - prof - 50, Math.max(2 * prof + 100, num(t.bayL) || bayAuto));
+      if(t.gn) shL = full - prof - 345;               // GN: средните крака — на 345 мм светло от крайните (стелажът е между тях)
       shX = right ? L - sideR - shL : sideL;
       midX = right ? shX : sideL + shL - prof;         // лявата страна на средните крака
     }
@@ -323,16 +324,15 @@
     const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : 0;
     let railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : [];
     // стелаж за GN 1/1: винкели 20×20 от двете страни на всяко ниво, на gnGap (345) светло — тавата 530×325 влиза отпред.
-    //  - 6 крака: в празната част, до крайните крака, с чифт стойки 30×30 (отпред и отзад);
+    //  - 6 крака: между крайните и средните крака (средните са на 345 мм светло от крайните);
     //  - 4 крака, тясна маса (gnDirect): направо между краката (краката — на 345 мм светло);
     //  - 4 крака, по-широка маса: стойки на 345 мм от крайните крака отляво/отдясно (gnSide); долните плотове — в другата част.
     const gn = !!t.gn, gnPitch = Math.max(40, num(t.gnPitch) || 120), gnLeft = t.gnSide !== "right";
     let gnX = null, gnA = 0, gnB = 0, gnLevels = 0, gnZ = [], gnOk = true;
     if(gn){
-      if(legs6){
-        gnX = right ? sideL + prof + gnGap : L - sideR - prof - gnGap - prof;          // лявата страна на стойките
-        gnOk = right ? gnX + prof <= midX - 20 : gnX >= midX + prof + 20;              // да не опира в средните крака
-        gnA = right ? sideL + prof : gnX + prof; gnB = right ? gnX : L - sideR - prof;
+      if(legs6){   // между крайните и средните крака (без отделни стойки); долният плот — от другата страна
+        gnA = right ? sideL + prof : midX + prof; gnB = right ? midX : L - sideR - prof;
+        gnOk = shL >= 2 * prof + 100;                                                  // да остане място за долния плот
       } else {   // тясна маса: направо между двата крака
         gnA = sideL + prof; gnB = L - sideR - prof; gnOk = Math.abs(gnB - gnA - gnGap) <= 20;
       }
@@ -342,7 +342,6 @@
       const max = Math.max(0, Math.floor((topZ - lowZ) / gnPitch) + 1);
       gnLevels = Math.min(max, Math.max(1, Math.round(num(t.gnLevels) || max)));
       for(let k = 0; k < gnLevels; k++) gnZ.push(Math.round((topZ - k * gnPitch) * 10) / 10);   // горната страна на винкела
-      if(gnOk && legs6) railXs = railXs.concat([gnX]).sort((a, b) => a - b);
     }
     const gnPosts = gn && gnOk && gnX != null ? [gnX] : [];
     // профилът отзад — на парчета между краката/стойките
@@ -559,15 +558,16 @@
         t.card.querySelector('.f-gnMin').textContent = "Минимум за GN 1/1: дълбочина " + mn.D + " мм, дължина " + mn.L + " мм" +
           (isGnNarrow(v) ? " (до " + mn.narrowMax + " мм — между два крака; над това — с 6 крака и долен плот до стелажа)." : ".");
         t.card.querySelector('.f-gnLevels').placeholder = "до " + g.gnLevels;
-        const where = v.legs6 ? "В празната част: две стойки 30×30 на 345 мм от крайните крака"
+        const where = v.legs6 ? "Между крайните и средните крака (средните са на 345 мм светло от крайните; долният плот е от другата страна)"
           : g.gnDirect ? "Направо между краката (краката са на 345 мм светло)" : "Две стойки 30×30 на 345 мм от " + (g.gnLeft ? "левите" : "десните") + " крака; долният плот е в другата част";
         t.card.querySelector('.f-gnInfo').textContent = g.gnOk && g.gnLevels
           ? where + " и винкели 20×20 — тавите влизат отпред. Нива: " + g.gnLevels + " (горното на " + g.gnZ[0] + " мм от пода, долното на " + g.gnZ[g.gnZ.length - 1] + " мм)." + (g.gnAngle < 530 ? " Внимание: масата е плитка за GN 1/1 (530 мм) — тавата ще стърчи отпред." : "")
-          : v.legs6 ? "Празната част е твърде къса за стелажа — намалете разстоянието до средните крака или удължете масата."
+          : v.legs6 ? "Масата е твърде къса за стелаж и долен плот до него — удължете масата."
           : g.gnDirect ? "Светлото между краката е " + (Math.round((g.gnB - g.gnA) * 10) / 10) + " мм, а за GN 1/1 трябва 345 мм — махнете отстоянието на краката в допълнителните настройки."
           : "Масата е твърде къса за стелаж и долен плот до него."; }
       if(v.legs6){ const g = tableGeo(v, PRICE);
         t.card.querySelector('.f-bayL').placeholder = "по средата " + g.bayAuto;
+        { const bi = t.card.querySelector('.f-bayL'); bi.disabled = !!v.gn; if(v.gn){ bi.value = ""; bi.placeholder = "за GN: " + (Math.round(g.shL * 10) / 10) + " (345 мм светло до крайните)"; } }
         t.card.querySelector('.f-legs6Info').textContent = "Средните крака са на " + (Math.round(g.shL * 10) / 10) + " мм от " + (g.right ? "десните" : "левите") +
           " крака (външно)" + (v.baseOn ? " — там е долният плот" + (v.midOn ? " и вторият междинен плот" : "") : "") + ". От другата страна остава празно до " +
           (Math.round((g.full - g.shL) * 10) / 10) + " мм."; }
