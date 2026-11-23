@@ -446,7 +446,7 @@
           [["wall","към стената (в дълбочината)"],["front","напред"],["none","без"]].concat(!t.hemDir ? [["","към стената, извън дълбочината (стара поръчка)"]] : [])
             .map(([v,l]) => '<option value="' + v + '"' + ((t.hemDir || "") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
         '<label>Подгъвка <span class="u">(мм)</span><input type="number" min="0" step="1" data-k="hem" value="' + esc(+t.hem > 0 ? t.hem : "") + '"' + dis + '></label></span>' +
-        '<label class="chk"><input type="checkbox" data-k="frame"' + (isFrame(t) ? " checked" : "") + (dis || (has6(t) || t.gn ? " disabled" : "")) + '> Рамка от профил, плотовете — тави отгоре (без сгъвка навътре)</label>' +
+        '<label class="chk"><input type="checkbox" data-k="frame"' + (isFrame(t) ? " checked" : "") + (dis || (has6(t) || +t.L > 1500 ? " disabled" : "")) + '> Рамка от профил, плотовете — тави отгоре (без сгъвка навътре)</label>' +
         '<label class="chk"><input type="checkbox" data-k="legs6"' + (has6(t) ? " checked" : "") + (dis || (has6(t) && !t.legs6 ? " disabled" : "")) + '> 6 крака</label>' +
         '<span class="legs6ctl"><label>Долните плотове<select data-k="shelfSide"' + dis + '>' + [["left","в лявата част"],["right","в дясната част"]]
             .map(([v,l]) => '<option value="' + v + '"' + ((t.shelfSide || "left") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
@@ -600,7 +600,8 @@
       if(g.gnAngle){ const a = g.gnA, b = g.gnB, n = g.gnZ.length;   // GN: винкелите
         g.gnZ.forEach(z => { d.rect(a, z - 20, 20, 20, d.S3); d.rect(b - 20, z - 20, 20, 20, d.S3); });
         if(n > 1) d.vdim(g.gnZ[n - 1], g.gnZ[n - 2], +d.X(a + (b - a) * 0.3), g.gnPitch + " стъпка", 1);
-        d.vdim(0, g.gnZ[n - 1], +d.X(a + (b - a) * 0.3), r1(g.gnZ[n - 1]) + " долу", 1); }
+        d.vdim(0, g.gnZ[n - 1], +d.X(a + (b - a) * 0.72), r1(g.gnZ[n - 1]) + " долу", 1);
+        d.vdim(g.gnZ[0], g.gnZ[0] + 40, +d.X(a + (b - a) * 0.7), "40", 1); }
       legX.forEach(x => d.rect(x, 0, prof, H - th, d.S1));
       const shelf = (at, e) => d.rect(g.shX, at - e, g.shL, e, d.S1);
       if(t.baseOn) shelf(base, g.eB);
@@ -627,10 +628,10 @@
       // над долния (междинния) плот: до работния плот и светлото под челната дъска — в средата на долния плот
       const xr = +d.X(g.shX + g.shL * 0.35), upper = t.midOn ? mid : base;
       if(t.baseOn){ d.vdim(upper, H, xr, r1(H - upper) + " до плота", 1); d.vdim(upper, topU, xr + 120, r1(topU - upper) + " светло", 1); }
-      else d.vdim(0, topU, xr, r1(topU) + " под плота", 1);
+      else if(!(g.gnAngle && !g.legs6)) d.vdim(0, topU, xr, r1(topU) + " под плота", 1);   // тясна маса с GN: нивата казват всичко
       if(g.rails){ const cx = (restA + restB) / 2 - 60;
         d.vdim(0, g.railH, +d.X(cx), r1(g.railH) + " профили", 1);
-        d.vdim(g.railH + prof, topU, +d.X(cx) + 70, r1(topU - g.railH - prof) + " над профилите", 1); }
+        if(g.legs6) d.vdim(g.railH + prof, topU, +d.X(cx) + 70, r1(topU - g.railH - prof) + " над профилите", 1); }
       d.note(0, H + spl + 8, "челна дъска " + g.eT + " мм" + (t.baseOn ? " · долен плот: кант " + g.eB + " мм" : "") + " · крака " + prof + "×" + prof);
     }, "Изглед отпред — размерите са в мм (външни страни на краката)");
     // ---- отстрани (отляво: отпред е вляво, стената — вдясно) ----
@@ -677,7 +678,7 @@
     const hi = card.querySelector('[data-k="hem"]'); if(hi){ hi.placeholder = S.splashHem; hi.disabled = order.stage !== "new" || t.hemDir === "none"; }
     card.querySelectorAll('[data-adv="midEdge"],[data-adv="midRet"]').forEach(e => e.hidden = !t.midOn);
     const fc = card.querySelector('[data-k="frame"]');   // при 6 крака рамката е задължителна
-    if(fc){ fc.checked = isFrame(t); fc.disabled = order.stage !== "new" || has6(t) || !!t.gn; fc.title = has6(t) ? "Масата с 6 крака е винаги с рамка от профил" : ""; }
+    if(fc){ fc.checked = isFrame(t); fc.disabled = order.stage !== "new" || has6(t) || +t.L > 1500; fc.title = has6(t) || +t.L > 1500 ? "Масата с 6 крака или над 1500 мм е винаги с рамка от профил" : ""; }
     if(isFrame(t)) card.querySelectorAll('[data-adv="topRet"],[data-adv="baseRet"],[data-adv="midRet"]').forEach(e => e.hidden = true);   // тави: без сгъвка навътре
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
     // с борд задният ръб не опира в стената — отстоянието на задните крака не се ползва
@@ -709,7 +710,7 @@
   // GN 1/1: направо между два крака само при тясна маса (до ≈ 585 мм); иначе масата е с 6 крака — стелажът е в празната част
   const isGnNarrow = t => !!(t && t.gn) && ((+t.L || 0) - 2 * (+t.legProfile || 30) - 345) < 180;
   const has6 = t => !!(t && (t.legs6 || (t.gn && !isGnNarrow(t))));
-  const isFrame = t => !!(t && (t.frame || has6(t) || t.gn));   // GN (и между два крака) — винаги с рамка
+  const isFrame = t => !!(t && (t.frame || has6(t) || (+t.L || 0) > 1500));   // рамка: избрана, при 6 крака, или маса над 1500 мм
   const LEG_NAMES = ["преден ляв","преден десен","заден ляв","заден десен"];
   function tableGeo(t, D){
     const num = v => (+v > 0 ? +v : 0);
@@ -752,7 +753,7 @@
     // (ако тясната маса има долен плот, рамката му е тази рамка); при GN рамката е затворена — и отпред
     const gnFrame = !!t.gn && (legs6 || !t.baseOn);
     const rails = (legs6 && !!t.rails) || gnFrame, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || (t.gn ? 150 : 100)));
-    const railFront = gnFrame;
+    const railFront = false;                       // отпред няма профил — там се вадят тавите
     const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : rails ? sideL + prof : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : rails ? L - sideR - prof : 0;
     let railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : rails ? [sideL, L - sideR - prof] : [];
     // стелаж за GN 1/1: винкели 20×20 от двете страни на всяко ниво, на gnGap (345) светло — тавата 530×325 влиза отпред.
@@ -768,7 +769,7 @@
       } else {   // тясна маса: направо между двата крака
         gnA = sideL + prof; gnB = L - sideR - prof; gnOk = Math.abs(gnB - gnA - gnGap) <= 20;
       }
-      const topZ = (+t.H || 0) - 1.5 - prof;                                           // винкелите: под рамката/плота …
+      const topZ = (+t.H || 0) - 1.5 - (frame ? prof : eT) - 40;                       // първият винкел: 40 мм под плота (рамката му) — да се бръкне за тавата …
       let lowZ = rails ? railH + prof + 30 : 80;                                       // … над профилите
       if(gnDirect) lowZ = Math.max(lowZ, (t.midOn ? Math.round(((+t.baseH || 0) + Math.max(0, (+t.H || 0) - 40)) / 2) : t.baseOn ? +t.baseH || 0 : 0) + 60);   // … над долния плот
       const max = Math.max(0, Math.floor((topZ - lowZ) / gnPitch) + 1);
@@ -1017,8 +1018,6 @@
         { kind:"tube", part:"Профил отстрани (между предния и задния крак — " + (g.legs6 ? "при средните и крайните крака" : "при левите и десните крака") + (g.gnPosts.length ? " и стойките за GN" : "") + ")", mat:tubeMat, size:fmt(g.railD), qty:g.railXs.length, note:at });
       g.railSegs.forEach(v => { tubes.push({ label:tag+" профил отзад", len:v }); if(g.railFront) tubes.push({ label:tag+" профил отпред", len:v }); }); g.railXs.forEach(() => tubes.push({ label:tag+" профил отстрани", len:g.railD }));
     }
-    if(g.gnDirect && !g.frame && Math.min(g.sideL, g.sideR) < g.sideStd - 0.05)
-      warns.push("Краката са на " + fmt(Math.min(g.sideL, g.sideR)) + " мм от ръба (за 345 мм светло за GN) — по-малко от сгъвката на плота (" + fmt(g.sideStd) + " мм). Изберете „Рамка от профил“ или удължете масата.");
     if(g.gnAngle && g.gnRoom < 530) warns.push("Масата е плитка за GN 1/1 (530 мм): от предния ръб до задните крака има само " + fmt(g.gnRoom) + " мм — тавата ще стърчи пред плота.");
     if(g.gn && !g.gnOk) warns.push(g.legs6 ? "Масата е твърде къса за стелаж за GN (345 мм светло) и долен плот до него — удължете масата."
       : g.gnDirect ? "За GN 1/1 светлото между краката трябва да е 345 мм, а е " + fmt(g.gnB - g.gnA) + " мм — махнете зададеното отстояние на краката отстрани или сменете дължината."

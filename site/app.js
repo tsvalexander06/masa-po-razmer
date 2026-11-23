@@ -311,7 +311,7 @@
   // GN 1/1: направо между два крака само при тясна маса (до ≈ 585 мм); иначе масата е с 6 крака — стелажът е в празната част
   const isGnNarrow = t => !!(t && t.gn) && ((+t.L || 0) - 2 * (+t.legProfile || 30) - 345) < 180;
   const has6 = t => !!(t && (t.legs6 || (t.gn && !isGnNarrow(t))));
-  const isFrame = t => !!(t && (t.frame || has6(t) || t.gn));   // GN (и между два крака) — винаги с рамка
+  const isFrame = t => !!(t && (t.frame || has6(t) || (+t.L || 0) > 1500));   // рамка: избрана, при 6 крака, или маса над 1500 мм
   const LEG_NAMES = ["преден ляв","преден десен","заден ляв","заден десен"];
   function tableGeo(t, D){
     const num = v => (+v > 0 ? +v : 0);
@@ -354,7 +354,7 @@
     // (ако тясната маса има долен плот, рамката му е тази рамка); при GN рамката е затворена — и отпред
     const gnFrame = !!t.gn && (legs6 || !t.baseOn);
     const rails = (legs6 && !!t.rails) || gnFrame, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || (t.gn ? 150 : 100)));
-    const railFront = gnFrame;
+    const railFront = false;                       // отпред няма профил — там се вадят тавите
     const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : rails ? sideL + prof : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : rails ? L - sideR - prof : 0;
     let railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : rails ? [sideL, L - sideR - prof] : [];
     // стелаж за GN 1/1: винкели 20×20 от двете страни на всяко ниво, на gnGap (345) светло — тавата 530×325 влиза отпред.
@@ -370,7 +370,7 @@
       } else {   // тясна маса: направо между двата крака
         gnA = sideL + prof; gnB = L - sideR - prof; gnOk = Math.abs(gnB - gnA - gnGap) <= 20;
       }
-      const topZ = (+t.H || 0) - 1.5 - prof;                                           // винкелите: под рамката/плота …
+      const topZ = (+t.H || 0) - 1.5 - (frame ? prof : eT) - 40;                       // първият винкел: 40 мм под плота (рамката му) — да се бръкне за тавата …
       let lowZ = rails ? railH + prof + 30 : 80;                                       // … над профилите
       if(gnDirect) lowZ = Math.max(lowZ, (t.midOn ? Math.round(((+t.baseH || 0) + Math.max(0, (+t.H || 0) - 40)) / 2) : t.baseOn ? +t.baseH || 0 : 0) + 60);   // … над долния плот
       const max = Math.max(0, Math.floor((topZ - lowZ) / gnPitch) + 1);
