@@ -22,6 +22,7 @@
   const TPL = `
     <h2><span class="num" style="margin-right:auto">Маса</span><button class="rm" type="button">✕ Премахни</button></h2>
 
+    <div class="tblErr f-errors" hidden></div>
     <h3>Чертеж (3D изглед)</h3>
     <svg class="bp draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"></svg>
 
@@ -29,11 +30,11 @@
     <div class="row">
       <div>
         <label>Дължина <span class="hint">(мм)</span></label>
-        <input type="number" class="f-L" value="1200" min="200" max="3000" step="10">
+        <input type="number" class="f-L" value="1200" min="300" max="2400" step="10">
       </div>
       <div>
         <label>Дълбочина <span class="hint">(мм)</span></label>
-        <input type="number" class="f-D" value="600" min="200" max="1200" step="10">
+        <input type="number" class="f-D" value="600" min="300" max="1200" step="10">
       </div>
     </div>
     <label>Височина <span class="hint">(мм)</span></label>
@@ -93,7 +94,7 @@
     <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долен плот</label>
     <div class="sub f-baseBox">
       <label>Разстояние от пода до долния плот <span class="hint">(мм)</span></label>
-      <input type="number" class="f-baseH" value="150" min="20" max="600" step="10">
+      <input type="number" class="f-baseH" value="150" min="20" max="800" step="10">
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-midOn"> Втори междинен плот</label>
@@ -161,6 +162,12 @@
     // registered before the render listeners so they run first
     midCb.addEventListener('input', ()=>{ if(midCb.checked) baseCb.checked = true; });
     baseCb.addEventListener('input', ()=>{ if(!baseCb.checked) midCb.checked = false; });
+    card.querySelectorAll('input[type=number]').forEach(inp => inp.addEventListener('change', () => {   // при излизане от полето — в границите му
+      if(inp.value === "") return;
+      const v = +inp.value, mn = inp.min !== "" ? +inp.min : -Infinity, mx = inp.max !== "" ? +inp.max : Infinity;
+      if(!isFinite(v)) { inp.value = ""; return; }
+      if(v < mn) inp.value = mn; else if(v > mx) inp.value = mx;
+    }));
     ['.f-D','.f-L'].forEach(sel => card.querySelector(sel).addEventListener('change', e => {   // GN: не по-малко от минимума
       if(!card.querySelector('.f-gn').checked) return;
       const mn = gnMins(readTable(t)), key = sel === '.f-D' ? 'D' : 'L';
@@ -190,6 +197,28 @@
     const D = Math.ceil((v.D + (530 - g.gnRoom)) / 10) * 10;                      // тавата 530 — от предния ръб до задните крака
     const L = 345 + 2 * prof + 2;                                                  // най-тясната: между два крака на 1 мм от ръба
     return { D:Math.max(D, 200), L, narrowMax:345 + 2 * prof + 180 - 1 };
+  }
+
+  // какво прави масата невъзможна за изработка — показва се в червено вместо цена; PDF не се праща
+  const LIMITS = { L:[300, 2400], D:[300, 1200], H:[400, 1200] };
+  function tableProblems(v){
+    const out = [], g = tableGeo(v, PRICE), r = x => Math.round(x * 10) / 10;
+    const lim = (k, name) => { const [a, b] = LIMITS[k]; if(!(v[k] >= a && v[k] <= b)) out.push(name + " трябва да е от " + a + " до " + b + " мм (сега " + (v[k] || 0) + ")."); };
+    lim("L", "Дължината"); lim("D", "Дълбочината"); lim("H", "Височината");
+    if(out.length) return out;                                        // без смислени размери другото няма значение
+    const types = PRICE.sheets.map(([W, H]) => [Math.max(W, H), Math.min(W, H)]);
+    if(pBlanks(v).some(([w, h]) => !types.some(([W, H]) => (Math.max(w, h) <= W && Math.min(w, h) <= H))))
+      out.push("Плотът е по-голям от листа ламарина (най-много 2500 × 1250 мм заедно с кантовете и борда) — намалете размерите или борда.");
+    if(g.span < 200) out.push("Между предните и задните крака остават само " + r(g.span) + " мм — намалете отстоянието на задните крака или увеличете дълбочината.");
+    if(g.full < 2 * g.prof + 100) out.push("Между левите и десните крака остават само " + r(g.full - 2 * g.prof) + " мм — намалете отстоянието на краката отстрани.");
+    if(g.legs6 && (g.shL < 2 * g.prof + 100 || g.full - g.shL - g.prof < 50)) out.push("Масата е твърде къса за 6 крака — удължете я или махнете средните крака.");
+    const topU = v.H - g.eT, upper = v.midOn ? v.mid2H : v.baseOn ? v.baseH : 0;
+    if((v.baseOn || v.midOn) && upper > topU - 100) out.push("Долният плот (на " + upper + " мм) е твърде близо до работния плот — трябва да е поне 100 мм под канта му (до " + Math.floor(topU - 100) + " мм).");
+    if(g.legs.some(l => !(l > 0)) || g.legAuto <= 0) out.push("Краката излизат с нулева дължина — увеличете височината.");
+    if(v.gn && (!g.gnOk || !g.gnLevels)) out.push(!g.gnLevels && g.gnOk ? "Няма място за нито едно ниво на стелажа за GN — увеличете височината или свалете долния плот."
+      : "Стелажът за GN не се събира — " + (g.legs6 ? "удължете масата." : "светлото между краката трябва да е 345 мм."));
+    if(v.gn && g.gnRoom < 530) out.push("Масата е плитка за GN 1/1 (530 мм) — увеличете дълбочината до поне " + gnMins(v).D + " мм.");
+    return out;
   }
 
   /* ---------- read a table's values ---------- */
@@ -578,6 +607,9 @@
       t.card.querySelector('.f-mid2info').textContent = v.midOn ? "(≈ "+v.mid2H+" мм от пода)" : "";
       drawBlueprint(v, t.card.querySelector('.draw'), PRICE);
       t.specText = tableSpec(v, i+1);
+      t.problems = tableProblems(v);
+      { const box = t.card.querySelector('.f-errors'); box.hidden = !t.problems.length;
+        box.innerHTML = t.problems.length ? '<b>Тази маса не може да се направи така:</b><ul>' + t.problems.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul>' : ""; }
     });
 
     let s="";
@@ -599,6 +631,8 @@
     $("promoBox").hidden=!priceShown;   // промокодът — под цената, след „Калкулирай цена“
     if(!priceShown){ box.hidden=true; return; }
     box.hidden=false;
+    const bad=tables.map((t,i)=>t.problems&&t.problems.length?i+1:0).filter(Boolean);
+    if(bad.length){ box.innerHTML='<div class="pbad">Няма цена: '+(bad.length>1?'масите '+bad.join(", ")+' не могат':'маса '+bad[0]+' не може')+' да се направи с тези размери. Вижте червеното поле при '+(bad.length>1?'тях':'нея')+'.</div>'; return; }
     const p=o&&o.price;
     if(!p){
       box.innerHTML='<div class="pmsg">Автоматичната цена ще бъде добавена скоро. Изпратете поръчката и ще се свържем с вас за потвърждение и цена.</div>';
@@ -754,8 +788,14 @@
     $("ok").innerHTML='PDF-ът е свален — прикачете го в чата: <a href="'+link+'" target="_blank" rel="noopener">отвори WhatsApp ›</a>';
     window.open(link,"_blank","noopener");
   }
+  // невъзможна маса → нищо не се изпраща; показва се къде е проблемът
+  function blockIfProblems(){
+    const t=tables.find(x=>x.problems&&x.problems.length); if(!t) return false;
+    $("ok").textContent="Поправете размерите в червеното поле на маса "+(tables.indexOf(t)+1)+" — така масата не може да се направи.";
+    t.card.querySelector('.f-errors').scrollIntoView({behavior:"smooth", block:"center"}); return true;
+  }
   $("wa").addEventListener("click",async()=>{
-    renderAll();
+    renderAll(); if(blockIfProblems()) return;
     const key=$("spec").textContent;
     try{
       // PDF already built for this exact order: share at once, while the tap still counts
@@ -963,7 +1003,7 @@
     return "MPR1:"+btoa(bin);
   }
   $("pdf").addEventListener("click",async()=>{
-    renderAll(); $("ok").textContent="Подготвям PDF...";
+    renderAll(); if(blockIfProblems()) return; $("ok").textContent="Подготвям PDF...";
     try{
       const blob=await buildPdfBlob();
       const dl=(window.claude&&claude.use)?await claude.use("downloads"):null;
