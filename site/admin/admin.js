@@ -94,7 +94,7 @@
                           // допълнителни (0 = стандартно, от „Настройки“); shelfEdge — от по-стари поръчки (основа и междинен)
                           advOn:false, topEdge:0, shelfEdge:0, baseEdge:0, midEdge:0, topRet:0, baseRet:0, midRet:0,
                           legSpan:0, legFL:0, legFR:0, legBL:0, legBR:0,
-                          legs6:false, shelfSide:"left", bayL:0, rails:false, railH:0, sideL:0, sideR:0, frame:false,   // frame: рамка от профил + тави отгоре   // rails: профили в празната част, railH от пода   // 6 крака: долните плотове в лявата/дясната част, bayL = до средните крака (външно)
+                          legs6:false, shelfSide:"left", bayL:0, rails:false, railH:0, sideL:0, sideR:0, frame:false, gn:false, gnLevels:0, gnPitch:0,   // gn: стелаж за GN 1/1 в празната част   // frame: рамка от профил + тави отгоре   // rails: профили в празната част, railH от пода   // 6 крака: долните плотове в лявата/дясната част, bayL = до средните крака (външно)
                           hemDir:"", hem:0 };   // подгъвка на борда: wall/front/none; "" = стара поръчка (към стената, извън дълбочината)
   function normTable(t){
     const n = Object.assign({}, TABLE_DEFAULT);
@@ -117,6 +117,7 @@
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
     fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
     kerf: 3,            // мм между заготовките при рязане
+    angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
     bend: 1,            // € за огъване (90°)
@@ -124,7 +125,7 @@
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
-  const pFloors = t => (isFrame(t) ? tableGeo(t,PRICE).frameJoints/4 : (t.legs6?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0)) + (t.legs6&&t.rails?1.5:0);   // 1 етаж = 4 заварки; рамка: 2 на царга
+  const pFloors = t => (isFrame(t) ? tableGeo(t,PRICE).frameJoints/4 : (t.legs6?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0)) + (()=>{ const g=tableGeo(t,PRICE); return g.railJoints/4 + (g.gnPosts.length ? g.gnLevels : 0); })();   // профили: 2 на парче; GN: 2 винкела × 2 края на ниво   // 1 етаж = 4 заварки; рамка: 2 на царга
   const pBends  = t => isFrame(t) ? (3 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):1)) + 4*((t.baseOn?1:0)+(t.midOn?1:0))   // тави: по 1 огъване на страна
                                : (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   // заготовките на една маса (мм): плот и долните плотове
@@ -184,11 +185,12 @@
     const bigCost=big.reduce((a,[w,h])=>a+w*h/1e6*PRICE.sheetM2,0);
     return { cost:((best?best.cost:0)+bigCost)*th, sheets:best?best.list:[], count:best?best.list.length:0 };
   }
-  const pTubeM = t => { const g=tableGeo(t,PRICE); return (g.legs.reduce((a,l)=>a+Math.max(0,l),0) + (g.legs6?2*Math.max(0,g.legAuto):0) + g.railLen + 2*g.railD + g.frameLen)/1000; };
+  const pTubeM = t => { const g=tableGeo(t,PRICE); return (g.legs.reduce((a,l)=>a+Math.max(0,l),0) + (g.legs6?2*Math.max(0,g.legAuto):0) + 2*g.gnPosts.length*Math.max(0,g.legAuto) + g.railLen + g.railXs.length*(g.rails?g.railD:0) + g.frameLen)/1000; };
+  const pAngleM = t => { const g=tableGeo(t,PRICE); return g.gnPosts.length ? 2*g.gnLevels*g.gnAngle/1000 : 0; };   // винкели 20×20 за GN
   function priceParts(t){
-    const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM,
+    const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM + pAngleM(t)*PRICE.angleM,
           weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
-    const caps=(t.legs6?6:4)*PRICE.capEach;   // тапички на краката
+    const caps=((t.legs6?6:4)+(tableGeo(t,PRICE).gnPosts.length?2:0))*PRICE.capEach;   // тапички на краката (и на стойките за GN)
     return { mat, tube, weld, bend, caps, base:mat+tube+weld+bend };
   }
   function priceFor(order){
@@ -258,7 +260,7 @@
       [+t.qty || 1, +t.L || 0, +t.D || 0, +t.H || 0, !!t.splashOn, +t.splashH || 0, +t.legBack || 0, !!t.baseOn, +t.baseH || 0, !!t.midOn]
         .concat(["topEdge","shelfEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan","legFL","legFR","legBL","legBR","hem"].map(k => +t[k] || 0), [t.hemDir || ""],
           +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], isFrame(t) ? ["frame"] : [],
-          t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0] : []))]);
+          t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0, !!t.gn, +t.gnLevels || 0, +t.gnPitch || 0] : []))]);
     let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
     return h.toString(36) + s.length.toString(36);
   }
@@ -450,7 +452,10 @@
             .map(([v,l]) => '<option value="' + v + '"' + ((t.shelfSide || "left") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
           '<label>До средните крака <span class="u">(мм, външно)</span><input type="number" min="0" step="any" data-k="bayL" value="' + esc(+t.bayL > 0 ? t.bayL : "") + '"' + dis + '></label>' +
           '<label class="chk"><input type="checkbox" data-k="rails"' + (t.rails ? " checked" : "") + dis + '> Профили в празната част (отзад и отстрани)</label>' +
-          '<label>Профили от пода <span class="u">(мм, долен ръб)</span><input type="number" min="0" step="any" data-k="railH" value="' + esc(+t.railH > 0 ? t.railH : "") + '"' + dis + '></label></span>' +
+          '<label>Профили от пода <span class="u">(мм, долен ръб)</span><input type="number" min="0" step="any" data-k="railH" value="' + esc(+t.railH > 0 ? t.railH : "") + '"' + dis + '></label>' +
+          '<label class="chk"><input type="checkbox" data-k="gn"' + (t.gn ? " checked" : "") + dis + '> Стелаж за GN 1/1 (в празната част)</label>' +
+          '<label>GN — брой нива <span class="u">(празно = колкото се събират)</span><input type="number" min="0" step="1" data-k="gnLevels" value="' + esc(+t.gnLevels > 0 ? t.gnLevels : "") + '"' + dis + '></label>' +
+          '<label>GN — стъпка между нивата <span class="u">(мм)</span><input type="number" min="0" step="1" data-k="gnPitch" value="' + esc(+t.gnPitch > 0 ? t.gnPitch : "") + '"' + dis + '></label></span>' +
         '<label class="chk"><input type="checkbox" data-k="baseOn"' + (t.baseOn ? " checked" : "") + dis + '> Долна основа (плот)</label>' +
         '<label class="chk"><input type="checkbox" data-k="midOn"' + (t.midOn ? " checked" : "") + dis + '> Втори междинен плот <span class="u mid2info"></span></label>' +
         '</div><div class="muted" style="margin-top:6px">Ламарина 1.5 мм · профил на краката 30×30 мм</div>' +
@@ -589,20 +594,27 @@
     const front = view(L, H, d => {
       if(spl) d.rect(0, H, L, spl, d.S2);                                        // бордът (отзад)
       if(g.rails) d.rect(g.railX0, g.railH, g.railLen, prof, d.S3);              // профилът отзад
-      const legX = [g.sideL, L - g.sideR - prof].concat(g.legs6 ? [g.midX] : []);
+      const legX = [g.sideL, L - g.sideR - prof].concat(g.legs6 ? [g.midX] : [], g.gnPosts);
+      if(g.gnPosts.length){ const a = g.right ? g.sideL + prof : g.gnX + prof, b = g.right ? g.gnX : L - g.sideR - prof, n = g.gnZ.length;   // GN: винкелите
+        g.gnZ.forEach(z => { d.rect(a, z - 20, 20, 20, d.S3); d.rect(b - 20, z - 20, 20, 20, d.S3); });
+        if(n > 1) d.vdim(g.gnZ[n - 1], g.gnZ[n - 2], +d.X(a + (b - a) * 0.3), g.gnPitch + " стъпка", 1);
+        d.vdim(0, g.gnZ[n - 1], +d.X(a + (b - a) * 0.3), r1(g.gnZ[n - 1]) + " долу", 1); }
       legX.forEach(x => d.rect(x, 0, prof, H - th, d.S1));
       const shelf = (at, e) => d.rect(g.shX, at - e, g.shL, e, d.S1);
       if(t.baseOn) shelf(base, g.eB);
       if(t.midOn) shelf(mid, g.eM);
       d.rect(0, topU, L, g.eT, d.S1);                                           // плотът (челната дъска)
       // по дължина: ръб → крака → (средни) → крака → ръб
-      const pts = [0, g.sideL].concat(g.legs6 ? (g.right ? [g.shX] : [g.shX + g.shL]) : [], [L - g.sideR, L]);
+      const pts = [0, g.sideL].concat(g.legs6 ? (g.right ? [g.shX] : [g.shX + g.shL]) : [], g.gnPosts.map(x => g.right ? x + prof : x), [L - g.sideR, L]).sort((p1, p2) => p1 - p2);
       for(let i = 0; i + 1 < pts.length; i++) d.hdim(pts[i], pts[i + 1], d.floor + 34, r1(pts[i + 1] - pts[i]), pts[i + 1] - pts[i] < 120);
       if(g.legs6){ if(g.right) d.hdim(0, g.midX, d.floor + 70, r1(g.midX) + " от левия ръб до средните крака");
         else d.hdim(g.midX + prof, L, d.floor + 70, r1(L - g.midX - prof) + " от средните крака до десния ръб"); }
       d.hdim(0, L, d.floor + 108, L + " — дължина");
-      if(g.legs6){ const a = g.right ? g.railX0 : g.railX0, b = g.railX1;
-        d.hdim(a, b, +d.Y(topU) + 40, "светло " + r1(b - a), false); }
+      // празната част: при стелаж за GN — стелажът (345) и останалото светло; иначе цялото светло
+      const gnA = g.gnPosts.length ? (g.right ? g.sideL + prof : g.gnX + prof) : 0, gnB = g.gnPosts.length ? (g.right ? g.gnX : L - g.sideR - prof) : 0;
+      const restA = g.gnPosts.length ? (g.right ? g.gnX + prof : g.railX0) : g.railX0, restB = g.gnPosts.length ? (g.right ? g.railX1 : g.gnX) : g.railX1;
+      if(g.legs6){ d.hdim(restA, restB, +d.Y(topU) + 40, "светло " + r1(restB - restA), false);
+        if(g.gnPosts.length) d.hdim(gnA, gnB, +d.Y(topU) + 40, g.gnGap + " GN 1/1", false); }
       // височини (вляво): работен плот, бордът, долният и междинният плот
       const xl = d.padL - 24;
       d.vdim(0, H, xl - 110, H + " височина", -1);
@@ -614,7 +626,7 @@
       const xr = +d.X(g.shX + g.shL * 0.35), upper = t.midOn ? mid : base;
       if(t.baseOn){ d.vdim(upper, H, xr, r1(H - upper) + " до плота", 1); d.vdim(upper, topU, xr + 120, r1(topU - upper) + " светло", 1); }
       else d.vdim(0, topU, xr, r1(topU) + " под плота", 1);
-      if(g.rails){ const cx = (g.railX0 + g.railX1) / 2;
+      if(g.rails){ const cx = (restA + restB) / 2 - 60;
         d.vdim(0, g.railH, +d.X(cx), r1(g.railH) + " профили", 1);
         d.vdim(g.railH + prof, topU, +d.X(cx) + 70, r1(topU - g.railH - prof) + " над профилите", 1); }
       d.note(0, H + spl + 8, "челна дъска " + g.eT + " мм" + (t.baseOn ? " · долен плот: кант " + g.eB + " мм" : "") + " · крака " + prof + "×" + prof);
@@ -650,7 +662,9 @@
     ADV_FIELDS.forEach(([k]) => { const inp = card.querySelector('[data-k="' + k + '"]'); if(inp) inp.placeholder = advAuto(t, k); });
     card.querySelectorAll('[data-adv="baseEdge"],[data-adv="baseRet"]').forEach(e => e.hidden = !t.baseOn);
     const hc = card.querySelector(".hemctl"); if(hc) hc.hidden = !t.splashOn;
-    const lc = card.querySelector(".legs6ctl"); if(lc){ lc.hidden = !t.legs6; const bi = lc.querySelector('[data-k="bayL"]'); if(bi) bi.placeholder = "по средата " + tableGeo(t, S).bayAuto; }
+    const lc = card.querySelector(".legs6ctl"); if(lc){ lc.hidden = !t.legs6; const g6 = tableGeo(t, S), bi = lc.querySelector('[data-k="bayL"]'); if(bi) bi.placeholder = "по средата " + g6.bayAuto;
+      const gl = lc.querySelector('[data-k="gnLevels"]'), gp = lc.querySelector('[data-k="gnPitch"]');
+      if(gl){ gl.placeholder = t.gn ? String(g6.gnLevels) : ""; gl.closest("label").hidden = !t.gn; } if(gp){ gp.placeholder = "120"; gp.closest("label").hidden = !t.gn; } }
     const hi = card.querySelector('[data-k="hem"]'); if(hi){ hi.placeholder = S.splashHem; hi.disabled = order.stage !== "new" || t.hemDir === "none"; }
     card.querySelectorAll('[data-adv="midEdge"],[data-adv="midRet"]').forEach(e => e.hidden = !t.midOn);
     const fc = card.querySelector('[data-k="frame"]');   // при 6 крака рамката е задължителна
@@ -718,11 +732,29 @@
     // профилите в празната част (само при 6 крака): x0..x1 = светлото между средния и крайния крак
     const rails = legs6 && !!t.rails, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || 100));
     const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : 0;
-    const railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : [];
+    let railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : [];
+    // стелаж за GN 1/1 (само при 6 крака, в празната част до крайните крака): чифт стойки 30×30 (отпред и отзад) на
+    // gnGap светло от крайните крака + винкели 20×20 от двете страни на всяко ниво (тавата 530×325 влиза отпред)
+    const gn = legs6 && !!t.gn, gnGap = 345, gnPitch = Math.max(40, num(t.gnPitch) || 120);
+    let gnX = null, gnLevels = 0, gnZ = [], gnOk = true;
+    if(gn){
+      gnX = right ? sideL + prof + gnGap : L - sideR - prof - gnGap - prof;            // лявата страна на стойките
+      gnOk = right ? gnX + prof <= midX - 20 : gnX >= midX + prof + 20;                // да не опира в средните крака
+      const topZ = (+t.H || 0) - 1.5 - prof, lowZ = rails ? railH + prof + 30 : 80;     // винкелите: под рамката на плота … над профилите
+      const max = Math.max(0, Math.floor((topZ - lowZ) / gnPitch) + 1);
+      gnLevels = Math.min(max, Math.max(1, Math.round(num(t.gnLevels) || max)));
+      for(let k = 0; k < gnLevels; k++) gnZ.push(Math.round((topZ - k * gnPitch) * 10) / 10);   // горната страна на винкела
+      if(gnOk) railXs = railXs.concat([gnX]).sort((a, b) => a - b);
+    }
+    const gnPosts = gn && gnOk ? [gnX] : [];
+    // профилът отзад — на парчета между краката/стойките
+    const railSegs = [];
+    if(rails){ const cut = [railX0].concat(gnPosts.length ? [gnX, gnX + prof] : [], [railX1]);
+      for(let i = 0; i + 1 < cut.length; i += 2) railSegs.push(Math.max(0, cut[i + 1] - cut[i])); }
     // рамката: царги между краката — под работния плот (отпред, отзад и при всеки чифт крака) и под всеки долен плот
     const frameRails = [];
     if(frame){
-      const xs = [sideL].concat(legs6 ? [midX] : [], [L - sideR - prof]).sort((a, b) => a - b), dd = Math.max(0, span - 2 * prof);
+      const xs = [sideL].concat(legs6 ? [midX] : [], gnPosts, [L - sideR - prof]).sort((a, b) => a - b), dd = Math.max(0, span - 2 * prof);
       for(let i = 0; i + 1 < xs.length; i++) frameRails.push({ lvl:"top", dir:"x", x:xs[i] + prof, len:Math.max(0, xs[i + 1] - xs[i] - prof), qty:2 });
       xs.forEach(x => frameRails.push({ lvl:"top", dir:"y", x, len:dd, qty:1 }));
       [["base", t.baseOn], ["mid", t.midOn]].forEach(([lvl, on]) => { if(!on) return;
@@ -732,7 +764,9 @@
     return { frame, frameRails, shPad:frame ? fg : 0, frameLen:frameRails.reduce((a, r) => a + r.len * r.qty, 0), frameJoints:frameRails.reduce((a, r) => a + 2 * r.qty, 0),
              eT, eB, eM, rT, rB, rM, hemDir, hem, hemIn, Dp, front, side, sideL, sideR, sideStd, back, minBack, span, shL, shD:span, shX, full, legAuto, legs,
              legs6, right, midX, bayAuto, nLegs:legs6 ? 6 : 4, prof,
-             rails, railH, railX0, railX1, railLen:rails ? Math.max(0, railX1 - railX0) : 0, railD:rails ? Math.max(0, span - 2 * prof) : 0, railXs };
+             rails, railH, railX0, railX1, railLen:railSegs.reduce((a, v) => a + v, 0), railSegs, railD:rails ? Math.max(0, span - 2 * prof) : 0, railXs,
+             railJoints:rails ? 2 * (railSegs.length + railXs.length) : 0,
+             gn, gnOk, gnX, gnGap, gnPitch, gnLevels, gnZ, gnPosts, gnAngle:gn && gnOk ? Math.max(0, span - 2 * prof) : 0 };
   }
 
   /* ---------- isometric 3D drawing (same in the customer form and the admin) ---------- */
@@ -789,7 +823,11 @@
     if(baseOn||midOn){ by=Math.min(legH-0.05, Math.max(0.03, baseH/1000)); shelf(by,thB); }
     if(midOn){ midY=Math.min(legH-0.05, (by+legH)/2); shelf(midY,thM); }
 
+    if(g.gnPosts.length){ const gx=g.gnX/1000, an=0.02, ex=[g.right?x0+lg:x1-lg, gx+(g.right?0:lg)];   // GN: стойките + винкелите
+      box(gx,0,backZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
+      g.gnZ.forEach(z=>{ const y=z/1000-an; [[g.right?x0+lg:gx+lg],[g.right?gx-an:x1-lg-an]].forEach(([ax])=>box(ax,y,backZ+lg,an,an,Math.max(0.01,frontZ-backZ-lg),TOP,FRONT,RIGHT)); }); }
     leg(0,lxL,frontZ); leg(1,lxR,frontZ); midLeg(frontZ);
+    if(g.gnPosts.length) box(g.gnX/1000,0,frontZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
     box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
     if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, sh=0.006;
       if(hm>0) box(0,h,g.hemDir==="front"?0:-hm,w,bs,hm+sh,TOP,FRONT,RIGHT);   // борд с подгъвка горе (към стената; „напред“ — само при стари поръчки)
@@ -926,7 +964,7 @@
     if(g.legs6) rows.push({ kind:"tube", part:"Крак — среден преден и среден заден", mat:tubeMat, size:fmt(g.legAuto), qty:2,
       note:"Височина " + t.H + " − лист " + th + (S.feet ? " − крачета " + S.feet : "") + " мм. Заварява се към кантовете на работния плот" +
         (shelves.length ? " и на " + shelves.map(sh => sh.who).join(", ") + " (те свършват при средните крака)" : "") + "." });
-    rows.push({ kind:"hw", part:S.feet ? "Регулируеми крачета" : "Тапи за краката", mat:"Окомплектовка", size:"—", qty:g.nLegs,
+    rows.push({ kind:"hw", part:S.feet ? "Регулируеми крачета" : "Тапи за краката", mat:"Окомплектовка", size:"—", qty:g.nLegs + 2 * g.gnPosts.length,
       note:S.feet ? "Височина "+S.feet+" мм." : "За тръба "+s+"×"+s+"." });
     g.legs.forEach(len => tubes.push({ label:tag+" крак", len }));
     if(g.legs6) [0, 1].forEach(() => tubes.push({ label:tag+" среден крак", len:g.legAuto }));
@@ -942,10 +980,22 @@
     }
     if(g.rails){
       const at = "Долният ръб на " + fmt(g.railH) + " мм от пода (горният на " + fmt(g.railH + s) + " мм); заварява се между краката, в празната част — отпред остава отворено.";
+      const segs = []; g.railSegs.forEach(v => { const x = segs.find(z => Math.abs(z.len - v) < 0.05); if(x) x.qty++; else segs.push({ len:v, qty:1 }); });
       rows.splice(rows.findIndex(r => r.kind === "hw"), 0,
-        { kind:"tube", part:"Профил отзад (между средния и крайния заден крак)", mat:tubeMat, size:fmt(g.railLen), qty:1, note:at },
-        { kind:"tube", part:"Профил отстрани (между предния и задния крак — при средните и при крайните)", mat:tubeMat, size:fmt(g.railD), qty:2, note:at });
-      tubes.push({ label:tag+" профил отзад", len:g.railLen }); [0, 1].forEach(() => tubes.push({ label:tag+" профил отстрани", len:g.railD }));
+        ...segs.map(sg => ({ kind:"tube", part:"Профил отзад (между " + (g.gnPosts.length ? "краката и стойките за GN" : "средния и крайния заден крак") + ")", mat:tubeMat, size:fmt(sg.len), qty:sg.qty, note:at })),
+        { kind:"tube", part:"Профил отстрани (между предния и задния крак — при средните, крайните" + (g.gnPosts.length ? " и стойките за GN" : "") + ")", mat:tubeMat, size:fmt(g.railD), qty:g.railXs.length, note:at });
+      g.railSegs.forEach(v => tubes.push({ label:tag+" профил отзад", len:v })); g.railXs.forEach(() => tubes.push({ label:tag+" профил отстрани", len:g.railD }));
+    }
+    if(g.gnPosts.length && g.gnAngle < 530) warns.push("Масата е плитка за GN 1/1 (530 мм): между предните и задните крака има само " + fmt(g.gnAngle) + " мм — тавата ще стърчи отпред.");
+    if(g.gn && !g.gnOk) warns.push("Стелажът за GN не се събира в празната част — стойките опират в средните крака. Увеличете празната част (по-малко разстояние до средните крака).");
+    if(g.gnPosts.length){
+      const nGap = g.gnGap + " мм светло между крайните крака и стойките (GN 1/1 = 530 × 325 мм)";
+      rows.splice(rows.findIndex(r => r.kind === "hw"), 0,
+        { kind:"tube", part:"Стойка за GN (предна и задна)", mat:tubeMat, size:fmt(g.legAuto), qty:2,
+          note:"Лявата страна на " + fmt(g.gnX) + " мм от левия ръб — " + nGap + "; заварява се към рамката на плота" + (g.rails ? " и профилите" : "") + "." },
+        { kind:"tube", part:"Винкел 20×20 за GN — " + g.gnLevels + " нива × 2 страни", mat:"Винкел 20×20", size:fmt(g.gnAngle), qty:2 * g.gnLevels,
+          note:"Горната страна на винкелите на " + g.gnZ.map(z => fmt(z)).join(", ") + " мм от пода (стъпка " + g.gnPitch + " мм); заваряват се от вътрешната страна на крайните крака и стойките, по дълбочината." });
+      [0, 1].forEach(() => tubes.push({ label:tag + " стойка GN", len:g.legAuto }));
     }
 
     // checks: nothing that cannot be built goes to the workshop silently
@@ -1353,7 +1403,8 @@
         ' · крака: предни–задни ' + fmt(r.geo.span) + ' мм (външно), от ръба отляво ' + fmt(r.geo.sideL) + ' / отдясно ' + fmt(r.geo.sideR) + ' мм' +
           LEG_KEYS.map((k, j) => +t[k] > 0 ? ', ' + LEG_NAMES[j] + ' ' + fmt(r.geo.legs[j]) + ' мм' : '').join('') +
           (r.geo.legs6 ? ' · <b>6 крака</b>: средните на ' + fmt(r.geo.shL) + ' мм от ' + (r.geo.right ? 'десните' : 'левите') + ' (външно)' +
-            (r.geo.rails ? ', профили в празната част на ' + fmt(r.geo.railH) + ' мм от пода' : '') : '') +
+            (r.geo.rails ? ', профили в празната част на ' + fmt(r.geo.railH) + ' мм от пода' : '') +
+            (r.geo.gnPosts.length ? ', <b>стелаж за GN 1/1</b>: ' + r.geo.gnLevels + ' нива през ' + r.geo.gnPitch + ' мм' : '') : '') +
         ' · долна основа: ' + (t.baseOn ? t.baseH + ' мм от пода' + (r.geo.legs6 ? ', в ' + (r.geo.right ? 'дясната' : 'лявата') + ' част' : '') : 'НЕ') +
         ' · втори междинен плот: ' + (t.midOn ? '≈ ' + mid2H(t) + ' мм от пода' : 'НЕ') +
         (t.notes.trim() ? '<br><b>Бележка:</b> ' + esc(t.notes) : '') + '</div>' +
@@ -3143,7 +3194,7 @@
     const prof = t.legProfile || 30, out = [], topZ = t.H, eT = Math.max(g.eT, 8);
     out.push({ x:0, y:0, z:topZ - eT, dx:t.L, dy:g.Dp, dz:eT, role:"top" });
     if(t.splashOn) out.push({ x:0, y:Math.max(0, g.Dp - 3), z:topZ, dx:t.L, dy:3 + g.hemIn, dz:+t.splashH || 0, role:"top" });
-    const xs = [g.sideL, t.L - g.sideR - prof].concat(g.legs6 ? [g.midX] : []), ys = [g.front, g.front + g.span - prof];
+    const xs = [g.sideL, t.L - g.sideR - prof].concat(g.legs6 ? [g.midX] : [], g.gnPosts), ys = [g.front, g.front + g.span - prof];
     xs.forEach(x => ys.forEach(y => out.push({ x, y, z:0, dx:prof, dy:prof, dz:topZ - eT, role:"leg" })));
     const shelf = (at, e) => out.push({ x:g.shX, y:g.front, z:at - Math.max(e, 6), dx:g.shL, dy:g.shD, dz:Math.max(e, 6), role:"shelf" });
     if(g.rails){ out.push({ x:g.railX0, y:g.front + g.span - prof, z:g.railH, dx:g.railLen, dy:prof, dz:prof, role:"leg" });
