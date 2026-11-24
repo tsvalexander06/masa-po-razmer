@@ -1866,9 +1866,33 @@
     b.textContent = ok ? "✓ Копирано" : "Не можа"; setTimeout(() => { b.textContent = was; }, 1400);
   });
 
+  // цената и себестойността на поръчка по ТЕКУЩАТА формула — същите суми като в долната лента, без разкроя
+  const PRICE_V = "2026-11-24";   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
+  function orderPriceSnap(o){
+    let mat = 0, tube = 0, weld = 0, bend = 0, caps = 0;
+    (o.tables || []).map(normTable).forEach(t => { const pp = priceParts(t), q = t.qty;
+      mat += pp.mat * q; tube += pp.tube * q; weld += pp.weld * q; bend += pp.bend * q; caps += pp.caps * q; });
+    const part = (p, q) => { const g = partGeo(p); mat += Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) * q; bend += g.bends * PRICE.bend * q; };
+    (o.parts || []).map(normPart).forEach(p => part(p, p.qty));
+    (o.assemblies || []).map(x => normAsm(x)).forEach(a => { a.items.forEach(it => part(it.part, it.part.qty * a.qty));
+      weld += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
+    return { clientPrice:orderClientPrice(o), cost:mat + tube + weld + bend + caps, costMaterials:mat + tube, weld, bend };
+  }
+  // запазените цени на поръчките в „Разкрой“ и „В обработка“ (и по желание в архива) — по текущата формула
+  function refreshPrices(withArchive){
+    let n = 0;
+    ORD.orders.forEach(o => {
+      if(o.stage === "archived" && !withArchive) return;
+      if(o.priceV === PRICE_V && !withArchive) return;
+      if(o.clientPrice != null || o.stage !== "new") Object.assign(o, orderPriceSnap(o));
+      o.priceV = PRICE_V; n++;
+    });
+    if(n) saveOrders();
+    return n;
+  }
   function snapPrices(o){
     const P = PRICING;
-    if(P){ o.clientPrice = P.client; o.cost = P.costTotal; o.costMaterials = P.costMaterials; o.weld = P.weld; o.bend = P.bend; }
+    if(P){ o.clientPrice = P.client; o.cost = P.costTotal; o.costMaterials = P.costMaterials; o.weld = P.weld; o.bend = P.bend; o.priceV = PRICE_V; }
   }
 
   // Разкрой → В обработка: takes the offcuts from the store, adds the new ones, gives the order its number
@@ -2134,7 +2158,7 @@
         takes.forEach(r => { const d = Object.assign({}, r.data, { id:r.id }), ex = ORD.orders.find(o => o.id === r.id);
           if(ex){ Object.keys(ex).forEach(k => delete ex[k]); Object.assign(ex, d); } else ORD.orders.push(d); });
         if(drops.length) ORD.orders = ORD.orders.filter(o => !drops.includes(o.id));
-        saveOrdersLocal(); } },
+        saveOrdersLocal(); setTimeout(() => { if(refreshPrices(false)) renderLists(); }, 0); } },
     offcuts:{ table:"offcuts", rows:() => INV.items.map(o => ({ id:o.id, data:o })),
       apply:(takes, drops) => {
         takes.forEach(r => { const d = Object.assign({}, r.data, { id:r.id }), i = INV.items.findIndex(o => o.id === r.id);
@@ -2319,6 +2343,13 @@
   }
 
   // full backup: orders with their PDFs, offcut store, settings, serial counters — one file
+  $("repriceArch").addEventListener("click", () => {
+    const b = $("repriceArch");
+    if(b.dataset.armed !== "1"){ b.dataset.armed = "1"; b.textContent = "Сигурно? Натиснете пак"; setTimeout(() => { b.dataset.armed = ""; b.textContent = "Преизчисли и архива по текущата формула"; }, 4000); return; }
+    b.dataset.armed = ""; b.textContent = "Преизчисли и архива по текущата формула";
+    const n = refreshPrices(true); renderLists(); if(PAGE === "archive") renderArchive();
+    $("dataStatus").textContent = "✓ Преизчислени " + n + " поръчки (клиентска цена и себестойност; продажната цена не е пипана).";
+  });
   $("fullExport").addEventListener("click", async () => {
     const st = $("dataStatus"); st.className = "status"; st.textContent = "Подготвям копието с документите...";
     const orders = [];
@@ -3573,6 +3604,7 @@
   buildSettings();
   $("palRun").addEventListener("click", runPallets);
   $("palPrint").addEventListener("click", () => { runPallets(); window.print(); });
+  refreshPrices(false);   // поръчките, запазени по стара формула — по текущата
   showPage("work");
   if(CLOUD){ renderDataInfo(); if(window.MPR_AUTHED) startCloud(); else document.addEventListener("mpr-auth", startCloud); }
   else syncState("local");
