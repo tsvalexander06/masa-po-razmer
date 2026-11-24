@@ -115,6 +115,10 @@
       <label>Разстояние от пода до долния плот <span class="hint">(мм)</span></label>
       <input type="number" class="f-baseH" value="150" min="20" max="800" step="10">
     </div>
+    <div class="sub f-sinkFrameBox" hidden>
+      <label>Рамка от профил 30×30 долу — височина от пода <span class="hint">(мм, до долния ръб)</span></label>
+      <input type="number" class="f-sinkRailH" value="150" min="20" max="800" step="10">
+    </div>
 
     <label class="toggle"><input type="checkbox" class="f-midOn"> Втори междинен плот</label>
     <div class="sub f-midBox">
@@ -323,6 +327,7 @@
         sinkExtSide:q('.f-sinkExtSide').value === "left" ? "left" : "right", D:PRICE.sinkD, splashOn:true, splashH:PRICE.sinkSplash, hemDir:"none", hem:0,
         midOn:false, legs6:false, gn:false, rails:false });
       v.L = PRICE.sinkL + v.sinkExt;
+      if(!v.baseOn) v.railH = tableGeo(Object.assign({}, v, { railH:+q('.f-sinkRailH').value || 150 }), PRICE).railH;   // без долен плот — рамка 30×30 долу
     }
     if(has6(v)){ v.legs6 = true; v.rails = q('.f-rails').checked; }   // GN на по-широка маса → винаги 6 крака
     if(v.gn){ v.rails = true; }                                        // GN → задължителна рамка долу (на 150 мм)
@@ -440,8 +445,9 @@
     // при GN — задължителна рамка от профил долу (на 150 мм): около стелажа при 6 крака, между краката при тясна маса
     // (ако тясната маса има долен плот, рамката му е тази рамка); при GN рамката е затворена — и отпред
     const gnFrame = !!t.gn && (legs6 || !t.baseOn);
-    const rails = (legs6 && !!t.rails) || gnFrame, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || (t.gn ? 150 : 100)));
-    const railFront = false;                       // отпред няма профил — там се вадят тавите
+    const sinkFrame = isSink(t) && !t.baseOn;      // мивка без долен плот: затворена рамка 30×30 долу (и отпред), на railH от пода
+    const rails = (legs6 && !!t.rails) || gnFrame || sinkFrame, railH = Math.min(Math.max(10, (+t.H || 0) - 200), Math.max(10, num(t.railH) || (t.gn || sinkFrame ? 150 : 100)));
+    const railFront = sinkFrame;                   // GN: отпред няма профил — там се вадят тавите
     const railX0 = legs6 ? (right ? sideL + prof : sideL + shL) : rails ? sideL + prof : 0, railX1 = legs6 ? (right ? shX : L - sideR - prof) : rails ? L - sideR - prof : 0;
     let railXs = legs6 ? (right ? [sideL, midX] : [midX, L - sideR - prof]) : rails ? [sideL, L - sideR - prof] : [];
     // стелаж за GN 1/1: винкели 20×20 от двете страни на всяко ниво, на gnGap (345) светло — тавата 530×325 влиза отпред.
@@ -551,15 +557,18 @@
     let bw0=0,bw1=0,bz0=0,bz1=0,bby=0;
     if(sk){ const [bl,bd,bh]=PRICE.sinkBowl, e=PRICE.sinkBowlEdge/1000;
       bw0=v.sink==="right"?sx1-e-bl/1000:sx0+e; bw1=bw0+bl/1000; bz0=Math.max(0.03,(d-bd/1000)/2); bz1=Math.min(d-0.03,bz0+bd/1000); bby=Math.max(0.05,h-bh/1000);
-      box(bw0,bby,bz0,bw1-bw0,Math.max(0.01,h-tt-bby),bz1-bz0,TOP,FRONT,RIGHT);
-      if(g.frame) g.frameRails.forEach(r=>{ if(r.lvl==="top"&&r.dir==="x") box(r.x/1000,h-0.0015-lg,frontZ,r.len/1000,lg,lg,TOP,FRONT,RIGHT); }); }   // предната царга — пред коритото
-    leg(0,lxL,frontZ); leg(1,lxR,frontZ); midLeg(frontZ);
-    if(g.gnPosts.length) box(g.gnX/1000,0,frontZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
-    if(sk){   // отворът на коритото: дъното и стените отвътре, после плотът около отвора; удължението — отстрани
-      if(ext>0&&sx0) box(0,h-tt,0,ext,tt,d,TOP,FRONT,RIGHT);
+      // отвътре (дъното, задната и лявата стена) и след това отвън (предната и дясната стена) — външните покриват вътрешните под ръба
       shapes.push({t:'poly',fill:B2,pts:[P(bw0,bby,bz0),P(bw1,bby,bz0),P(bw1,bby,bz1),P(bw0,bby,bz1)]});
       shapes.push({t:'poly',fill:B2R,pts:[P(bw0,bby,bz0),P(bw1,bby,bz0),P(bw1,h,bz0),P(bw0,h,bz0)]});
       shapes.push({t:'poly',fill:FRONT,pts:[P(bw0,bby,bz0),P(bw0,bby,bz1),P(bw0,h,bz1),P(bw0,h,bz0)]});
+      const ht=h-tt;
+      shapes.push({t:'poly',fill:RIGHT,pts:[P(bw1,bby,bz0),P(bw1,ht,bz0),P(bw1,ht,bz1),P(bw1,bby,bz1)]});
+      shapes.push({t:'poly',fill:FRONT,pts:[P(bw0,bby,bz1),P(bw1,bby,bz1),P(bw1,ht,bz1),P(bw0,ht,bz1)]});
+      if(g.frame) g.frameRails.forEach(r=>{ if(r.lvl==="top"&&r.dir==="x") box(r.x/1000,h-0.0015-lg,frontZ,r.len/1000,lg,lg,TOP,FRONT,RIGHT); }); }   // предната царга — пред коритото
+    leg(0,lxL,frontZ); leg(1,lxR,frontZ); midLeg(frontZ);
+    if(g.gnPosts.length) box(g.gnX/1000,0,frontZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
+    if(sk){   // плотът около отвора на коритото (коритото е нарисувано по-горе); удължението — отстрани
+      if(ext>0&&sx0) box(0,h-tt,0,ext,tt,d,TOP,FRONT,RIGHT);
       box(sx0,h-tt,0,sx1-sx0,tt,bz0,TOP,FRONT,RIGHT); box(sx0,h-tt,bz0,bw0-sx0,tt,bz1-bz0,TOP,FRONT,RIGHT);
       box(bw1,h-tt,bz0,sx1-bw1,tt,bz1-bz0,TOP,FRONT,RIGHT); box(sx0,h-tt,bz1,sx1-sx0,tt,d-bz1,TOP,FRONT,RIGHT);
       if(ext>0&&!sx0) box(sx1,h-tt,0,ext,tt,d,TOP,FRONT,RIGHT); }
@@ -582,7 +591,7 @@
         [[P(w,h,d),P(w+off,h,d)]]);
     if(sk&&ext>0){ const zz=d+off*0.45, n=sinkExtOf(v);   // мивка и удължение по дължината
       (sx0?[[0,ext,'удължение '+n],[sx0,sx1,'мивка '+PRICE.sinkL]]:[[0,sx1,'мивка '+PRICE.sinkL],[sx1,w,'удължение '+n]])
-        .forEach(([a,b,txt])=>dim(P(a,0,zz),P(b,0,zz),P((a+b)/2,0,zz),txt,'middle',0,16,[[P(a,0,d),P(a,0,zz)],[P(b,0,d),P(b,0,zz)]])); }
+        .forEach(([a,b,txt])=>dim(P(a,0,zz),P(b,0,zz),P((a+b)/2,0,zz),txt,'middle',0,-6,[[P(a,0,d),P(a,0,zz)],[P(b,0,d),P(b,0,zz)]])); }
     if(g.back>0.5){ const sx=w+off*1.9;
       dim(P(sx,0,0),P(sx,0,backZ),P(sx,0,backZ/2),Math.round(g.back*10)/10+'','start',10,-2,
         [[P(w,0,0),P(sx,0,0)],[P(x1,0,backZ),P(sx,0,backZ)]]);
@@ -602,6 +611,9 @@
     }
     if(baseOn) dim(P(-off,0,d),P(-off,by,d),P(-off,by/2,d),baseH+'','end',-8,0,
         [[P(0,0,d),P(-off,0,d)],[P(0,by,d),P(-off,by,d)]]);
+    else if(g.railFront){ const ry=g.railH/1000;   // мивка без долен плот: височината на рамката долу
+      dim(P(-off,0,d),P(-off,ry,d),P(-off,ry/2,d),Math.round(g.railH)+'','end',-8,0,[[P(0,0,d),P(-off,0,d)],[P(0,ry,d),P(-off,ry,d)]]);
+      shapes.push({t:'cap',p:P(-off,ry,d),txt:'рамка',dx:-52,dy:-8}); }
     if(midOn){ const mx2=-off*2.0;
       dim(P(mx2,0,d),P(mx2,midY,d),P(mx2,midY/2,d),v.mid2H+'','end',-8,0,
         [[P(0,midY,d),P(mx2,midY,d)]]);
@@ -639,7 +651,8 @@
   function tableSpec(v, n){
     let s="🔧 МАСА "+n+" — ИНОКС ПО РАЗМЕР\n──────────────\n";
     if(v.sink) s+="Вид:        мивка — готов модул "+PRICE.sinkL+" × "+PRICE.sinkD+" мм с борд, корито "+(v.sink==="right"?"вдясно":"вляво")+"\n"+
-                  "Удължение:  "+(v.sinkExt ? v.sinkExt+" мм "+(v.sinkExtSide==="left"?"отляво":"отдясно")+" (заварено към мивката; общи крака и долен плот)" : "няма")+"\n";
+                  "Удължение:  "+(v.sinkExt ? v.sinkExt+" мм "+(v.sinkExtSide==="left"?"отляво":"отдясно")+" (заварено към мивката; общи крака и долен плот)" : "няма")+"\n"+
+                  (v.baseOn ? "" : "Рамка долу: профил 30 × 30 отпред, отзад и отстрани, на "+v.railH+" мм от пода\n");
     s+="Дължина:    "+v.L+" мм\n";
     s+="Дълбочина:  "+v.D+" мм\n";
     s+="Височина:   "+v.H+" мм\n";
@@ -709,7 +722,7 @@
         l6.closest('label').style.display = hide.includes("legs6") || forced ? "none" : "";
         t.card.querySelector('.f-gn').closest('label').style.display = hide.includes("gn") ? "none" : ""; }
       { const sk = !!v.sink, q = s => t.card.querySelector(s), show = (el, on) => { el.style.display = on ? "" : "none"; };   // мивка: размерите и бордът са на модула
-        q('.f-sinkBox').hidden = !sk;
+        q('.f-sinkBox').hidden = !sk; q('.f-sinkFrameBox').hidden = !(sk && !v.baseOn);
         show(q('.f-L').closest('.row'), !sk); show(q('.f-splashOn').closest('label'), !sk); if(sk) show(q('.f-splashBox'), false);
         show(q('.f-midOn').closest('label'), !sk); show(q('.f-advOn').closest('label'), !sk);
         if(sk) q('.f-sinkInfo').textContent = "Мивка " + PRICE.sinkL + " × " + PRICE.sinkD + " мм с борд " + PRICE.sinkSplash + " мм" +
