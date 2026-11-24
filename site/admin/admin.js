@@ -97,7 +97,14 @@
                           advOn:false, topEdge:0, shelfEdge:0, baseEdge:0, midEdge:0, topRet:0, baseRet:0, midRet:0,
                           legSpan:0, legFL:0, legFR:0, legBL:0, legBR:0,
                           legs6:false, shelfSide:"left", bayL:0, rails:false, railH:0, sideL:0, sideR:0, frame:false, gn:false, gnLevels:0, gnPitch:0, gnSide:"left",   // gn: стелаж за GN 1/1 в празната част   // frame: рамка от профил + тави отгоре   // rails: профили в празната част, railH от пода   // 6 крака: долните плотове в лявата/дясната част, bayL = до средните крака (външно)
+                          sink:"", sinkExt:0, sinkExtSide:"right",   // мивка: "left"/"right" = коритото; sinkExt — удължение (мм), sinkExtSide — от коя страна
                           hemDir:"", hem:0 };   // подгъвка на борда: wall/front/none; "" = стара поръчка (към стената, извън дълбочината)
+  // мивка: модулът е готов (1200 × 700 с борд 100) — дължината = модул + удължение; без междинен плот, 6 крака и GN
+  function sinkFix(t){
+    if(t.sink !== "left" && t.sink !== "right"){ t.sink = ""; return t; }
+    t.sinkExt = Math.max(0, Math.min(1200, Math.round(+t.sinkExt || 0))); if(t.sinkExtSide !== "left") t.sinkExtSide = "right";
+    return Object.assign(t, { L:PRICE.sinkL + t.sinkExt, D:PRICE.sinkD, splashOn:true, splashH:PRICE.sinkSplash, hemDir:"none", hem:0, midOn:false, legs6:false, gn:false, rails:false });
+  }
   function normTable(t){
     const n = Object.assign({}, TABLE_DEFAULT);
     for(const k in TABLE_DEFAULT){
@@ -106,6 +113,7 @@
       n[k] = typeof d === "number" ? (+t[k] || 0) : typeof d === "boolean" ? !!t[k] : String(t[k]);
     }
     n.qty = Math.max(1, Math.round(n.qty || 1));
+    sinkFix(n);
     return n;
   }
   // same formula as the customer form: halfway between the base and the underside of the top
@@ -126,21 +134,27 @@
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     bend: 0.6,          // € за огъване (90°) — без надценка; +20% от 0,50
     capEach: 3,         // € за тапичка на крак (4 на маса)
+    sinkTop: 450,       // € — мивка: готов горен модул (купува се; в цената за клиента — без надценка)
+    sinkL: 1200, sinkD: 700, sinkSplash: 100,   // мм — модулът на мивката (с борд)
+    sinkBowl: [450, 610, 290], sinkBowlEdge: 100,   // коритото: по дължината × отпред назад × дълбочина; от края на модула
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
   // заварки в см: всеки шев на тръба 30×30 (крак, царга, профил) × 12 см + краищата на винкелите за GN × 4 см
   const pWeldCm = t => { const g=tableGeo(t,PRICE);
     const joints=(isFrame(t) ? g.frameJoints : 4*((has6(t)?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0))) + g.railJoints;   // без рамка: 4 шева на плот (6 крака — 6)
-    return joints*PRICE.weldTubeCm + (g.gnAngle ? g.gnLevels*4*PRICE.weldAngleCm : 0); };   // GN: 2 винкела × 2 края на ниво
-  const pBends  = t => isFrame(t) ? (3 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):1)) + 4*((t.baseOn?1:0)+(t.midOn?1:0))   // тави: по 1 огъване на страна
-                               : (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
+    return joints*PRICE.weldTubeCm + (g.gnAngle ? g.gnLevels*4*PRICE.weldAngleCm : 0)   // GN: 2 винкела × 2 края на ниво
+      + (sinkExtOf(t) ? (+t.D||0)/10 + 2*(+t.splashH||0)/10 : 0); };   // удължение към мивката: по плота (дълбочината) + борда отпред и отзад
+  const pBends  = t => { const fr=isFrame(t), sp=t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):(fr?1:2);   // тави: по 1 огъване на страна
+    const top=(fr?3:6)+sp;   // мивка без удължение: плотът е готов — без огъвания
+    return (isSink(t) && !sinkExtOf(t) ? 0 : top) + (fr?4:8)*((t.baseOn?1:0)+(t.midOn?1:0)); };
   // заготовките на една маса (мм): плот и долните плотове
   function pBlanks(t){
     const P=PRICE, g=tableGeo(t,P), cT=P.topCut/(g.frame?4:2), cS=P.shelfCut/(g.frame?4:2);
     const fl=(e,r,c)=>e+(r>0?r-P.stretch:0)-c, ft=fl(g.eT,g.rT,cT);
     const back = t.splashOn ? (+t.splashH||0)+g.hem-cT : ft;
-    const out=[[t.L+2*ft, g.Dp+ft+back]];
+    const topL=isSink(t) ? sinkExtOf(t) : t.L;   // мивка: от нас е само удължението
+    const out=topL>0 ? [[topL+2*ft, g.Dp+ft+back]] : [];
     const shelf=(e,r)=>{ const f=fl(e,r,cS)+g.shPad; if(g.shL>0&&g.shD>0) out.push([g.shL+2*f, g.shD+2*f]); };
     if(t.baseOn) shelf(g.eB,g.rB);
     if(t.midOn) shelf(g.eM,g.rM);
@@ -198,12 +212,13 @@
     const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM + pAngleM(t)*PRICE.angleM,
           weld=pWeldCm(t)*PRICE.weldPerCm, bend=pBends(t)*PRICE.bend;   // заварките — извън надценката
     const caps=((has6(t)?6:4)+(tableGeo(t,PRICE).gnPosts.length?2:0))*PRICE.capEach;   // тапички на краката (и на стойките за GN)
-    return { mat, tube, weld, bend, caps, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
+    const buy=isSink(t) ? PRICE.sinkTop : 0;   // готовата мивка — без надценка
+    return { mat, tube, weld, bend, caps, buy, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
   }
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour;   // заварките — фиксирано, без надценка
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour + pp.buy;   // заварките и готовата мивка — без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
@@ -453,6 +468,11 @@
           [["wall","към стената (в дълбочината)"],["front","напред"],["none","без"]].concat(!t.hemDir ? [["","към стената, извън дълбочината (стара поръчка)"]] : [])
             .map(([v,l]) => '<option value="' + v + '"' + ((t.hemDir || "") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
         '<label>Подгъвка <span class="u">(мм)</span><input type="number" min="0" step="1" data-k="hem" value="' + esc(+t.hem > 0 ? t.hem : "") + '"' + dis + '></label></span>' +
+        '<span class="sinkctl"><label>Мивка (готов модул ' + PRICE.sinkL + ' × ' + PRICE.sinkD + ')<select data-k="sink"' + dis + '>' + [["","няма — обикновена маса"],["left","корито вляво"],["right","корито вдясно"]]
+            .map(([v,l]) => '<option value="' + v + '"' + ((t.sink || "") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
+          '<span class="sinkmore"><label>Удължение <span class="u">(мм; 0 = без)</span><input type="number" min="0" max="1200" step="1" data-k="sinkExt" value="' + esc(+t.sinkExt || 0) + '"' + dis + '></label>' +
+          '<label>Удължението е<select data-k="sinkExtSide"' + dis + '>' + [["right","отдясно"],["left","отляво"]]
+            .map(([v,l]) => '<option value="' + v + '"' + ((t.sinkExtSide || "right") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label></span></span>' +
         '<label class="chk"><input type="checkbox" data-k="frame"' + (isFrame(t) ? " checked" : "") + (dis || (has6(t) || +t.L > 1500 ? " disabled" : "")) + '> Рамка от профил, плотовете — тави отгоре (без сгъвка навътре)</label>' +
         '<label class="chk"><input type="checkbox" data-k="legs6"' + (has6(t) ? " checked" : "") + (dis || (has6(t) && !t.legs6 ? " disabled" : "")) + '> 6 крака</label>' +
         '<span class="legs6ctl"><label>Долните плотове<select data-k="shelfSide"' + dis + '>' + [["left","в лявата част"],["right","в дясната част"]]
@@ -554,6 +574,10 @@
           if((k === "baseEdge" || k === "midEdge") && +t.shelfEdge > 0){
             ["baseEdge","midEdge"].forEach(x => { if(x !== k && !(+t[x] > 0)) t[x] = +t.shelfEdge; }); t.shelfEdge = 0; }
           if(ADV_FIELDS.some(([x]) => x === k)) t.advOn = ADV_FIELDS.some(([x]) => +t[x] > 0);
+          if(isSink(t) || k === "sink"){ sinkFix(t);   // мивка: размерите и бордът — на модула
+            ["L","D","splashH"].forEach(x => { const f = card.querySelector('[data-k="' + x + '"]'); if(f && f !== inp) f.value = t[x]; });
+            ["splashOn","midOn","legs6","gn"].forEach(x => { const f = card.querySelector('[data-k="' + x + '"]'); if(f) f.checked = !!t[x]; });
+            const hd = card.querySelector('[data-k="hemDir"]'); if(hd) hd.value = t.hemDir; }
           drawTable(i); recompute(); edited();
         });
       });
@@ -671,7 +695,9 @@
     const vh = card.querySelector(".viewsHost"); if(vh) vh.innerHTML = tableViews(t);
     ADV_FIELDS.forEach(([k]) => { const inp = card.querySelector('[data-k="' + k + '"]'); if(inp) inp.placeholder = advAuto(t, k); });
     card.querySelectorAll('[data-adv="baseEdge"],[data-adv="baseRet"]').forEach(e => e.hidden = !t.baseOn);
-    const hc = card.querySelector(".hemctl"); if(hc) hc.hidden = !t.splashOn;
+    const hc = card.querySelector(".hemctl"); if(hc) hc.hidden = !t.splashOn || isSink(t);
+    { const sk = isSink(t), sm = card.querySelector(".sinkmore"); if(sm) sm.hidden = !sk;   // мивка: дължина, дълбочина, борд — от модула
+      ["L","D","splashH","splashOn","midOn","legs6","gn"].forEach(k => { const f = card.querySelector('[data-k="' + k + '"]'); if(f){ if(sk) f.disabled = true; else if(order.stage === "new" && !(k === "legs6" && !!t.gn && !isGnNarrow(t))) f.disabled = false; f.title = sk ? "При мивка се определя от модула и удължението" : f.title; } }); }
     const g6 = tableGeo(t, S);
     const rc = card.querySelector('[data-k="rails"]'); if(rc){ rc.checked = !!t.rails || !!t.gn; rc.disabled = order.stage !== "new" || !!t.gn; rc.title = t.gn ? "При GN рамката долу е задължителна" : ""; }
     const rh = card.querySelector('[data-k="railH"]'); if(rh) rh.placeholder = t.gn ? "150" : "100";
@@ -720,6 +746,9 @@
   const isGnNarrow = t => !!(t && t.gn) && ((+t.L || 0) - 2 * (+t.legProfile || 30) - 345) < 180;
   const has6 = t => !!(t && (t.legs6 || (t.gn && !isGnNarrow(t))));
   const isFrame = t => !!(t && (t.frame || has6(t) || (+t.L || 0) > 1500));   // рамка: избрана, при 6 крака, или маса над 1500 мм
+  // мивка: готов горен модул (купува се) + удължение (масичка), заварено отстрани; краката и долният плот — наши, общи за двете
+  const isSink = t => !!t && (t.sink === "left" || t.sink === "right");
+  const sinkExtOf = t => isSink(t) ? Math.max(0, Math.round(+t.sinkExt || 0)) : 0;
   const LEG_NAMES = ["преден ляв","преден десен","заден ляв","заден десен"];
   function tableGeo(t, D){
     const num = v => (+v > 0 ? +v : 0);
@@ -868,12 +897,27 @@
     if(g.gnAngle){ const an=0.02;   // GN: стойките (ако има) + винкелите от двете страни на всяко ниво
       if(g.gnPosts.length) box(g.gnX/1000,0,backZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
       g.gnZ.forEach(z=>{ const y=z/1000-an; [g.gnA/1000, g.gnB/1000-an].forEach(ax=>box(ax,y,backZ+lg,an,an,Math.max(0.01,frontZ-backZ-lg),TOP,FRONT,RIGHT)); }); }
+    // мивка: модулът (sx0–sx1) и удължението; коритото отвън — под плота
+    const sk=isSink(v), ext=sinkExtOf(v)/1000, sx0=sk&&v.sinkExtSide==="left"?ext:0, sx1=sx0+PRICE.sinkL/1000;
+    let bw0=0,bw1=0,bz0=0,bz1=0,bby=0;
+    if(sk){ const [bl,bd,bh]=PRICE.sinkBowl, e=PRICE.sinkBowlEdge/1000;
+      bw0=v.sink==="right"?sx1-e-bl/1000:sx0+e; bw1=bw0+bl/1000; bz0=Math.max(0.03,(d-bd/1000)/2); bz1=Math.min(d-0.03,bz0+bd/1000); bby=Math.max(0.05,h-bh/1000);
+      box(bw0,bby,bz0,bw1-bw0,Math.max(0.01,h-tt-bby),bz1-bz0,TOP,FRONT,RIGHT);
+      if(g.frame) g.frameRails.forEach(r=>{ if(r.lvl==="top"&&r.dir==="x") box(r.x/1000,h-0.0015-lg,frontZ,r.len/1000,lg,lg,TOP,FRONT,RIGHT); }); }   // предната царга — пред коритото
     leg(0,lxL,frontZ); leg(1,lxR,frontZ); midLeg(frontZ);
     if(g.gnPosts.length) box(g.gnX/1000,0,frontZ,lg,Math.max(0.01,legH),lg,TOP,FRONT,RIGHT);
-    box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
+    if(sk){   // отворът на коритото: дъното и стените отвътре, после плотът около отвора; удължението — отстрани
+      if(ext>0&&sx0) box(0,h-tt,0,ext,tt,d,TOP,FRONT,RIGHT);
+      shapes.push({t:'poly',fill:B2,pts:[P(bw0,bby,bz0),P(bw1,bby,bz0),P(bw1,bby,bz1),P(bw0,bby,bz1)]});
+      shapes.push({t:'poly',fill:B2R,pts:[P(bw0,bby,bz0),P(bw1,bby,bz0),P(bw1,h,bz0),P(bw0,h,bz0)]});
+      shapes.push({t:'poly',fill:FRONT,pts:[P(bw0,bby,bz0),P(bw0,bby,bz1),P(bw0,h,bz1),P(bw0,h,bz0)]});
+      box(sx0,h-tt,0,sx1-sx0,tt,bz0,TOP,FRONT,RIGHT); box(sx0,h-tt,bz0,bw0-sx0,tt,bz1-bz0,TOP,FRONT,RIGHT);
+      box(bw1,h-tt,bz0,sx1-bw1,tt,bz1-bz0,TOP,FRONT,RIGHT); box(sx0,h-tt,bz1,sx1-sx0,tt,d-bz1,TOP,FRONT,RIGHT);
+      if(ext>0&&!sx0) box(sx1,h-tt,0,ext,tt,d,TOP,FRONT,RIGHT); }
+    else box(0,h-tt,0,w,tt,d,TOP,FRONT,RIGHT);
     if(splashOn){ const bs=Math.max(0.03, splashH/1000), hm=g.hem/1000, sh=0.006;
       if(hm>0) box(0,h,g.hemDir==="front"?0:-hm,w,bs,hm+sh,TOP,FRONT,RIGHT);   // борд с подгъвка горе (към стената; „напред“ — само при стари поръчки)
-      else box(0,h,0,w,bs,sh,TOP,FRONT,RIGHT); }                              // без подгъвка: само ламарината нагоре
+      else (sk&&ext>0 ? (sx0?[[0,ext],[sx0,sx1]]:[[0,sx1],[sx1,w]]) : [[0,w]]).forEach(([a,b])=>box(a,h,0,b-a,bs,sh,TOP,FRONT,RIGHT)); }   // без подгъвка: само ламарината нагоре (мивка: модул + удължение)
 
     const off=Math.max(w,d,h)*0.16+0.05;
     function dim(a,b,lp,txt,anchor,dx,dy,ext){
@@ -887,6 +931,9 @@
         [[P(w,0,zD),P(w+off,0,zD)],[P(w,0,d),P(w+off,0,d)]]);
     dim(P(w+off,0,d),P(w+off,h,d),P(w+off,h/2,d),realH+'','start',8,0,
         [[P(w,h,d),P(w+off,h,d)]]);
+    if(sk&&ext>0){ const zz=d+off*0.45, n=sinkExtOf(v);   // мивка и удължение по дължината
+      (sx0?[[0,ext,'удължение '+n],[sx0,sx1,'мивка '+PRICE.sinkL]]:[[0,sx1,'мивка '+PRICE.sinkL],[sx1,w,'удължение '+n]])
+        .forEach(([a,b,txt])=>dim(P(a,0,zz),P(b,0,zz),P((a+b)/2,0,zz),txt,'middle',0,16,[[P(a,0,d),P(a,0,zz)],[P(b,0,d),P(b,0,zz)]])); }
     if(g.back>0.5){ const sx=w+off*1.9;
       dim(P(sx,0,0),P(sx,0,backZ),P(sx,0,backZ/2),Math.round(g.back*10)/10+'','start',10,-2,
         [[P(w,0,0),P(sx,0,0)],[P(x1,0,backZ),P(sx,0,backZ)]]);
@@ -959,13 +1006,14 @@
     const fTop = flange(E, R, cT);
     const hem = t.splashOn ? g.hem : 0, back = t.splashOn ? t.splashH + hem - cT : fTop;
     const hemWhere = g.hemDir === "front" ? "напред (над плота)" : "назад към стената";
-    const topW = t.L + 2*fTop, topD = g.Dp + fTop + back;
-    rows.push({ kind:"sheet", part:"Работен плот" + (t.splashOn ? " с борд" : ""), mat:sheetMat, size:fmt(topW)+" × "+fmt(topD), qty:1,
-      note:"Готов: "+t.L+" × "+fmt(g.Dp)+" мм"+(g.hemIn ? " (обща дълбочина "+t.D+" мм с подгъвката към стената)" : "")+". Отпред и отстрани: "+profTxt(E, R)+"; отзад: "+(t.splashOn ? "борд "+t.splashH+" мм нагоре"+(hem ? " + подгъвка "+hem+" мм "+hemWhere+" (огъване нагоре на "+fmt(back)+" мм и подгъвка на "+hem+" мм от задния ръб на заготовката)" : " (огъване нагоре на "+fmt(back)+" мм от задния ръб на заготовката)") : "същото")+
+    const sk = isSink(t), ext = sinkExtOf(t), topL = sk ? ext : t.L;   // мивка: плотът от нас е само удължението
+    const topW = topL + 2*fTop, topD = g.Dp + fTop + back;
+    if(topL > 0) rows.push({ kind:"sheet", part:sk ? "Удължение (плот с борд) — заварява се " + (t.sinkExtSide === "left" ? "отляво" : "отдясно") + " към мивката" : "Работен плот" + (t.splashOn ? " с борд" : ""), mat:sheetMat, size:fmt(topW)+" × "+fmt(topD), qty:1,
+      note:"Готов: "+topL+" × "+fmt(g.Dp)+" мм"+(g.hemIn ? " (обща дълбочина "+t.D+" мм с подгъвката към стената)" : "")+". Отпред и отстрани: "+profTxt(E, R)+"; отзад: "+(t.splashOn ? "борд "+t.splashH+" мм нагоре"+(hem ? " + подгъвка "+hem+" мм "+hemWhere+" (огъване нагоре на "+fmt(back)+" мм и подгъвка на "+hem+" мм от задния ръб на заготовката)" : " (огъване нагоре на "+fmt(back)+" мм от задния ръб на заготовката)") : "същото")+
            ". Изрези в ъглите: отпред "+fmt(fTop)+"×"+fmt(fTop)+", отзад "+fmt(fTop)+"×"+fmt(back)+" мм. Виж схемата." });
-    sheets.push({ label:tag+" плот", w:topW, h:topD });
-    schemes.push({ title:"Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:t.L, plateD:g.Dp, E, R,
-      backUp:!!t.splashOn, splashH:t.splashH, hem, hemFront:g.hemDir === "front", backFlat:back, leg:0, blankW:topW, blankD:topD, cut:cT * 2 });
+    if(topL > 0){ sheets.push({ label:tag+(sk ? " удължение" : " плот"), w:topW, h:topD });
+      schemes.push({ title:sk ? "Удължение към мивката (плот с борд)" : "Работен плот" + (t.splashOn ? " с борд" : ""), qty:1, plateL:topL, plateD:g.Dp, E, R,
+        backUp:!!t.splashOn, splashH:t.splashH, hem, hemFront:g.hemDir === "front", backFlat:back, leg:0, blankW:topW, blankD:topD, cut:cT * 2 }); }
 
     // долните плотове са между краката: очертанието им = външните страни на краката (виж tableGeo)
     const shL = g.shL + 2 * g.shPad, shD = g.shD + 2 * g.shPad;   // рамка: тавата е по-голяма от рамката
@@ -1065,6 +1113,8 @@
     const highest = t.midOn ? mid2H(t) : t.baseOn ? t.baseH : 0;
     if(highest && highest >= t.H - th - g.eT) warns.push("Най-горният долен плот (на " + highest + " мм) стига до канта на работния плот (" + g.eT + " мм).");
     if(t.midOn && mid2H(t) <= t.baseH) warns.push("Вторият междинен плот не е над основата — проверете височините.");
+    if(sk) rows.push({ kind:"hw", part:"Мивка — готов модул " + PRICE.sinkL + " × " + PRICE.sinkD + " мм с борд, корито " + (t.sink === "right" ? "вдясно" : "вляво"), mat:"Купува се", size:"—", qty:1,
+      note:"Краката и долният плот се заваряват към мивката" + (ext ? " и удължението; удължението се заварява към мивката по плота (" + fmt(t.D / 10) + " см) и по борда отпред и отзад (2 × " + fmt(t.splashH / 10) + " см)" : "") + "." });
     return { rows, sheets, tubes, warns, schemes, geo:g };
   }
 
@@ -1387,7 +1437,7 @@
        The whole sheets to buy are shown apart: what is left of them goes to the offcut store. */
     let matOurs = 0, tubeOurs = 0, weldOurs = 0, bendOurs = 0, capsOurs = 0;
     o.tables.forEach(t => { const pp = priceParts(t), q = t.qty;
-      matOurs += pp.mat * q; tubeOurs += pp.tube * q; weldOurs += pp.weld * q; bendOurs += pp.bend * q; capsOurs += pp.caps * q; });
+      matOurs += (pp.mat + pp.buy) * q; tubeOurs += pp.tube * q; weldOurs += pp.weld * q; bendOurs += pp.bend * q; capsOurs += pp.caps * q; });
     parts.forEach(r => { matOurs += Math.max(0, r.g.area) / 1e6 * PRICE.sheetM2 * (r.p.th / 1.5) * r.p.qty; bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
     (o.assemblies || []).forEach(a => { weldOurs += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
     const costMaterials = matOurs + tubeOurs;
@@ -1877,11 +1927,11 @@
   });
 
   // цената и себестойността на поръчка по ТЕКУЩАТА формула — същите суми като в долната лента, без разкроя
-  const PRICE_V = "2026-11-24d";   // задните крака — мин. 50 мм от задния ръб   // труд без надценка; шев на крак 6 см; заварка 0,60 €/см, огъване 0,60 € (+20%)   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
+  const PRICE_V = "2026-11-24e";   // мивка (готов модул + удължение)   // задните крака — мин. 50 мм от задния ръб   // труд без надценка; шев на крак 6 см; заварка 0,60 €/см, огъване 0,60 € (+20%)   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
   function orderPriceSnap(o){
     let mat = 0, tube = 0, weld = 0, bend = 0, caps = 0;
     (o.tables || []).map(normTable).forEach(t => { const pp = priceParts(t), q = t.qty;
-      mat += pp.mat * q; tube += pp.tube * q; weld += pp.weld * q; bend += pp.bend * q; caps += pp.caps * q; });
+      mat += (pp.mat + pp.buy) * q; tube += pp.tube * q; weld += pp.weld * q; bend += pp.bend * q; caps += pp.caps * q; });
     const part = (p, q) => { const g = partGeo(p); mat += Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) * q; bend += g.bends * PRICE.bend * q; };
     (o.parts || []).map(normPart).forEach(p => part(p, p.qty));
     (o.assemblies || []).map(x => normAsm(x)).forEach(a => { a.items.forEach(it => part(it.part, it.part.qty * a.qty));
@@ -3276,6 +3326,8 @@
     const prof = t.legProfile || 30, out = [], topZ = t.H, eT = Math.max(g.eT, 8);
     out.push({ x:0, y:0, z:topZ - eT, dx:t.L, dy:g.Dp, dz:eT, role:"top" });
     if(t.splashOn) out.push({ x:0, y:Math.max(0, g.Dp - 3), z:topZ, dx:t.L, dy:3 + g.hemIn, dz:+t.splashH || 0, role:"top" });
+    if(isSink(t)){ const [bl, bd, bh] = PRICE.sinkBowl, ext = sinkExtOf(t), x0 = t.sinkExtSide === "left" ? ext : 0;   // коритото виси под плота
+      out.push({ x:t.sink === "right" ? x0 + PRICE.sinkL - PRICE.sinkBowlEdge - bl : x0 + PRICE.sinkBowlEdge, y:Math.max(0, (g.Dp - bd) / 2), z:topZ - bh, dx:bl, dy:Math.min(bd, g.Dp), dz:bh - eT, role:"top" }); }
     const xs = [g.sideL, t.L - g.sideR - prof].concat(g.legs6 ? [g.midX] : [], g.gnPosts), ys = [g.front, g.front + g.span - prof];
     xs.forEach(x => ys.forEach(y => out.push({ x, y, z:0, dx:prof, dy:prof, dz:topZ - eT, role:"leg" })));
     const shelf = (at, e) => out.push({ x:g.shX, y:g.front, z:at - Math.max(e, 6), dx:g.shL, dy:g.shD, dz:Math.max(e, 6), role:"shelf" });
