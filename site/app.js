@@ -585,6 +585,9 @@
     shapes.forEach(s=>{ if(s.t==='dim'){const a=s.pts[0],b=s.pts[1];svg+='<line x1="'+mx(a.x).toFixed(1)+'" y1="'+my(a.y).toFixed(1)+'" x2="'+mx(b.x).toFixed(1)+'" y2="'+my(b.y).toFixed(1)+'" stroke="#1E6FF4" stroke-width="1.1" marker-start="url(#ar)" marker-end="url(#ar)"/>';} });
     shapes.forEach(s=>{ if(s.t==='text') svg+='<text x="'+(mx(s.p.x)+s.dx).toFixed(1)+'" y="'+(my(s.p.y)+s.dy).toFixed(1)+'" font-size="14" font-weight="700" fill="#1552c7" text-anchor="'+s.anchor+'" style="paint-order:stroke;stroke:#f8fafc;stroke-width:3.5px">'+s.txt+'</text>'; });
     shapes.forEach(s=>{ if(s.t==='cap') svg+='<text x="'+(mx(s.p.x)+s.dx).toFixed(1)+'" y="'+(my(s.p.y)+s.dy).toFixed(1)+'" font-size="10" font-weight="600" fill="#a21caf" text-anchor="start" style="paint-order:stroke;stroke:#f8fafc;stroke-width:3px">'+s.txt+'</text>'; });
+    // своите id за всеки чертеж: еднакви id в няколко svg (напр. скрити картинки на шаблоните) правят чертежа прозрачен
+    const uid = svgEl.dataset.uid || (svgEl.dataset.uid = "b" + (drawBlueprint.n = (drawBlueprint.n || 0) + 1));
+    svg = svg.replace(/id="(ar|g[TFR]2?)"/g, 'id="' + uid + '$1"').replace(/url\(#(ar|g[TFR]2?)\)/g, 'url(#' + uid + '$1)');
     svgEl.innerHTML=svg;
   }
 
