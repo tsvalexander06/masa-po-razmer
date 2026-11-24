@@ -37,19 +37,16 @@
       <div>
         <label>Дължина <span class="hint">(мм)</span></label>
         <input type="number" class="f-L" value="1200" min="300" max="2400" step="10">
-        <div class="chips" data-for="L"></div>
       </div>
       <div>
         <label>Дълбочина <span class="hint">(мм)</span></label>
         <input type="number" class="f-D" value="600" min="300" max="1200" step="10">
-        <div class="chips" data-for="D"></div>
       </div>
     </div>
     <label>Височина <span class="hint">(мм)</span></label>
     <input type="number" class="f-H" value="850" min="400" max="1200" step="10">
-    <div class="chips" data-for="H"></div>
 
-    <label class="toggle"><input type="checkbox" class="f-splashOn"> С борд (кант отзад)</label>
+    <label class="toggle"><input type="checkbox" class="f-splashOn"> Заден борд</label>
     <div class="sub f-splashBox">
       <label>Височина на борда <span class="hint">(мм)</span></label>
       <input type="number" class="f-splashH" value="100" min="20" max="300" step="10">
@@ -65,8 +62,9 @@
     </div>
 
     <div class="f-legBackBox">
-      <label>Отстояние на задните крака от задния ръб (стената) <span class="hint">(мм, мин. 12 мм)</span></label>
+      <label>Отстояние на задните крака от задния ръб (стената) <span class="hint f-legBackHint">(мм, мин. 12 мм)</span></label>
       <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
+      <input type="number" class="f-splashBack" value="0" min="0" max="400" step="1">
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-legs6"> 6 крака (още един чифт крака по средата)</label>
@@ -76,6 +74,7 @@
         <option value="left" selected>в лявата част (гледано отпред)</option>
         <option value="right">в дясната част (гледано отпред)</option>
       </select>
+      <div class="f-legs6More" hidden>
       <label>Разстояние от крайните до средните крака <span class="hint">(мм, външно — колкото е дълъг долният плот; празно = средните крака са по средата)</span></label>
       <input type="number" class="f-bayL" min="100" max="3000" step="1">
       <p class="info f-legs6Info"></p>
@@ -83,6 +82,7 @@
       <div class="f-railBox">
         <label>Височина на профилите от пода <span class="hint">(мм, до долния им ръб)</span></label>
         <input type="number" class="f-railH" value="100" min="10" max="1000" step="1">
+      </div>
       </div>
     </div>
 
@@ -96,8 +96,8 @@
         <div><span class="hint">Брой нива</span><input type="number" class="f-gnLevels" min="1" max="20" step="1"></div>
         <div><span class="hint">Разстояние между нивата (мм)</span><input type="number" class="f-gnPitch" value="120" min="40" max="400" step="1"></div>
       </div>
-      <p class="info f-gnInfo"></p>
-      <p class="hint f-gnMin" style="margin-top:6px"></p>
+      <p class="info f-gnInfo" hidden></p>
+      <p class="hint f-gnMin" style="margin-top:6px" hidden></p>
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-baseOn" checked> Долен плот</label>
@@ -163,17 +163,15 @@
 
   /* ---------- шаблони: често поръчвани маси (размерите са само начални — клиентът ги сменя) ---------- */
   const TEMPLATES = [
-    { id:"work",    name:"Работна маса",               desc:"Плот и долен плот за съхранение",              v:{ L:800, D:600 } },
-    { id:"wall",    name:"Маса до стена с борд",       desc:"Борд отзад до стената и долен плот",           v:{ L:1800, D:700, splashOn:true } },
-    { id:"two",     name:"Маса с два долни плота",     desc:"Долен и междинен плот — повече място",          v:{ L:1200, D:600, midOn:true } },
-    { id:"under",   name:"Маса за уред отдолу",        desc:"Без долен плот — за хладилник, кош, машина",    v:{ L:1200, D:700, baseOn:false } },
-    { id:"stand",   name:"Стойка за уред",             desc:"Ниска маса за конвектомат, фурна, котлон",      v:{ L:900, D:700, H:600 }, chips:{ L:[600, 800, 900, 1000, 1200], H:[500, 600, 700, 800] } },
-    { id:"standgn", name:"Стойка за конвектомат с GN", desc:"Ниска, със стелаж за тави GN 1/1 отдолу",       v:{ L:900, D:700, H:700, gn:true }, chips:{ L:[800, 900, 1000, 1200], D:[700, 800], H:[600, 700, 800] } },
-    { id:"gn",      name:"Тясна маса със стелаж GN",   desc:"Тавите GN 1/1 влизат между двата крака",        v:{ L:420, D:650, baseOn:false, gn:true }, chips:{ L:[410, 420, 450, 500], D:[650, 700, 800] } },
-    { id:"six",     name:"Маса с 6 крака",             desc:"Дълга маса, долен плот в едната част",          v:{ L:2000, D:700, splashOn:true, legs6:true } },
+    // hide: опциите, които нямат смисъл за този вид (6 крака, стелаж GN)
+    { id:"work",    name:"Работна маса",               desc:"Плот и долен плот за съхранение",              v:{ L:800, D:600 }, hide:["legs6", "gn"] },
+    { id:"wall",    name:"Маса до стена с борд",       desc:"Заден борд до стената и долен плот",           v:{ L:1800, D:700, splashOn:true }, hide:["legs6", "gn"] },
+    { id:"two",     name:"Маса с два долни плота",     desc:"Долен и междинен плот — повече място",          v:{ L:1200, D:600, midOn:true }, hide:["legs6", "gn"] },
+    { id:"standgn", name:"Стойка за конвектомат с GN", desc:"Ниска, със стелаж за тави GN 1/1 отдолу",       v:{ L:900, D:700, H:700, gn:true } },
+    { id:"gn",      name:"Тясна маса със стелаж GN",   desc:"Тавите GN 1/1 влизат между двата крака",        v:{ L:420, D:650, baseOn:false, gn:true } },
+    { id:"six",     name:"Маса с 6 крака",             desc:"Дълга маса, долен плот в едната част",          v:{ L:2000, D:700, splashOn:true, legs6:true }, hide:["legs6", "gn"] },
   ];
   const TPL_BASE = { L:1200, D:600, H:850, splashOn:false, baseOn:true, midOn:false, legs6:false, gn:false, legBack:70, baseH:150 };
-  const CHIPS = { L:[600, 800, 1000, 1200, 1500, 1800, 2000, 2400], D:[500, 600, 700, 800], H:[800, 850, 900] };
   // малка картинка на шаблона — само масата, без размери
   function tplPicture(svg, tp){
     const v = Object.assign({ splashH:100, hemDir:"wall", hem:20, legProfile:30, notes:"", shelfSide:"left", bayL:0, rails:false, railH:0, noDims:true }, TPL_BASE, tp.v);
@@ -185,7 +183,7 @@
     const q = s => t.card.querySelector(s), v = Object.assign({}, TPL_BASE, tp ? tp.v : {});
     q('.f-L').value = v.L; q('.f-D').value = v.D; q('.f-H').value = v.H;
     q('.f-splashOn').checked = v.splashOn; q('.f-baseOn').checked = v.baseOn || v.midOn; q('.f-midOn').checked = v.midOn;
-    q('.f-legs6').checked = v.legs6; q('.f-gn').checked = v.gn; q('.f-legBack').value = v.legBack; q('.f-baseH').value = v.baseH;
+    q('.f-legs6').checked = v.legs6; q('.f-gn').checked = v.gn; q('.f-legBack').value = v.legBack; q('.f-splashBack').value = 0; q('.f-baseH').value = v.baseH;
     q('.f-advOn').checked = false; q('.f-bayL').value = ""; q('.f-gnLevels').value = ""; q('.f-gnPitch').value = 120;
     t.tpl = tp || null; t.picked = true;
     if(v.gn){ const mn = gnMins(readTable(t)); if(+q('.f-D').value < mn.D) q('.f-D').value = mn.D; }
@@ -196,16 +194,6 @@
     const q = s => t.card.querySelector(s);
     q('.tplBox').hidden = !!t.picked; q('.tplChosen').hidden = !t.picked; q('.tblBody').hidden = !t.picked;
     q('.tplName').textContent = t.tpl ? t.tpl.name : "по ваш избор";
-    // бутоните с размери — според вида (стойка: по-ниски височини, тясна GN маса: тесни дължини)
-    ["L", "D", "H"].forEach(k => {
-      const box = q('.chips[data-for="' + k + '"]'), list = (t.tpl && t.tpl.chips && t.tpl.chips[k]) || CHIPS[k];
-      box.innerHTML = list.map(n => '<button type="button" class="chip" data-v="' + n + '">' + n + '</button>').join("");
-    });
-    markChips(t);
-  }
-  function markChips(t){
-    ["L", "D", "H"].forEach(k => { const val = +t.card.querySelector('.f-' + k).value;
-      t.card.querySelectorAll('.chips[data-for="' + k + '"] .chip').forEach(c => c.classList.toggle("on", +c.dataset.v === val)); });
   }
   function buildPicker(t){
     const grid = t.card.querySelector('.tplGrid');
@@ -254,14 +242,9 @@
       card.remove();
       renderAll();
     });
-    // шаблони: избор на вида, после лесно нагласяне с бутони за размерите
+    // шаблони: избор на вида, после нагласяне на размерите
     buildPicker(t);
     card.querySelector('.tplChange').addEventListener('click', () => { t.picked = false; showTplState(t); card.scrollIntoView({ behavior:"smooth", block:"start" }); });
-    card.querySelectorAll('.chips').forEach(box => box.addEventListener('click', e => {
-      const c = e.target.closest('.chip'); if(!c) return;
-      const inp = card.querySelector('.f-' + box.dataset.for); inp.value = c.dataset.v;
-      inp.dispatchEvent(new Event('change')); renderAll();
-    }));
     showTplState(t);
     tables.push(t);
     renderAll();
@@ -310,6 +293,7 @@
       splashOn:q('.f-splashOn').checked, splashH:+q('.f-splashH').value||0,
       hemDir:q('.f-hemDir').value, hem:q('.f-hemDir').value==="none" ? 0 : Math.min(60, Math.max(10, Math.round(+q('.f-hem').value||20))),
       legBack:Math.max(12, +q('.f-legBack').value||0),   // минимум 12 мм (зад перото 12 мм)
+      splashBack:Math.max(0, Math.min(400, +q('.f-splashBack').value||0)),   // с борд: 0 = краката опират отзад
       baseOn:q('.f-baseOn').checked, baseH,
       midOn:q('.f-midOn').checked, mid2H,
       notes:q('.f-notes').value.trim(),
@@ -411,7 +395,7 @@
     if(gnDirect && !num(t.sideL) && !num(t.sideR)){ const sd = ((+t.L || 0) - 2 * gnProf - gnGap) / 2; if(sd >= 1){ sideL = sideR = Math.round(sd * 10) / 10; } }
     const side = sideL;
     const minBack = frame ? fg : t.splashOn ? 0 : rT;  // без борд: зад сгъвката; с борд задът е свободен; рамка: в тавата
-    let back = t.splashOn ? minBack : Math.max(minBack, +t.legBack || 0);
+    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack (0 = най-отзад)
     let span = Dp - front - back;
     if(num(t.legSpan)){ span = num(t.legSpan); back = Dp - front - span; }
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
@@ -616,6 +600,7 @@
     if(v.splashOn) s+="Подгъвка на борда: "+(v.hemDir==="wall" ? v.hem+" мм към стената (включена в дълбочината "+v.D+" мм; плот "+(v.D-v.hem)+" мм)"
                                           : v.hemDir==="front" ? v.hem+" мм напред" : "НЕ")+"\n";
     if(!v.splashOn) s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
+    else if(v.splashBack) s+="Задни крака отстояние от ръба: "+v.splashBack+" мм\n";
     if(v.legs6){ const g = tableGeo(v, PRICE);
       s+="Крака:      6 (среден чифт на "+(Math.round(g.shL*10)/10)+" мм от "+(g.right?"десните":"левите")+" крака, външно)\n";
       if(v.rails && !v.gn) s+="Профили в празната част: отзад и отстрани, на "+v.railH+" мм от пода (отпред е отворено)\n";
@@ -649,6 +634,8 @@
 
   /* ---------- render everything ---------- */
   function renderAll(){
+    $("afterTables").hidden = !tables.some(t => t.picked);              // без избрана маса — нищо отдолу
+    $("addTable").style.display = tables.some(t => !t.picked) ? "none" : "";
     tables.forEach((t,i)=>{
       t.card.querySelector('.num').textContent = "Маса "+(i+1);
       t.card.querySelector('.rm').style.display = tables.length>1 ? "inline-flex" : "none";
@@ -660,13 +647,20 @@
         t.card.querySelector('.f-hemInfo').textContent = v.hemDir==="wall"
           ? "Общата дълбочина "+v.D+" мм е до стената и включва подгъвката: плот "+g.Dp+" мм + подгъвка "+v.hem+" мм."
           : "Без подгъвка — дълбочината на плота е "+v.D+" мм."; }
-      t.card.querySelector('.f-legBackBox').style.display = (v.splashOn || v.legSpan) ? "none" : "block";
+      t.card.querySelector('.f-legBackBox').style.display = v.legSpan ? "none" : "block";
+      t.card.querySelector('.f-legBack').style.display = v.splashOn ? "none" : "";
+      t.card.querySelector('.f-splashBack').style.display = v.splashOn ? "" : "none";
+      t.card.querySelector('.f-legBackHint').textContent = v.splashOn ? "(мм; 0 = краката са най-отзад)" : "(мм, мин. 12 мм)";
       t.card.querySelector('.f-legs6Box').style.display = v.legs6 ? "block" : "none";
       t.card.querySelector('.f-railBox').style.display = v.rails && !v.gn ? "block" : "none";
       { const rc = t.card.querySelector('.f-rails'); rc.disabled = !!v.gn; if(v.gn) rc.checked = true; }
       t.card.querySelector('.f-gnBox').style.display = v.gn ? "block" : "none";
       { const l6 = t.card.querySelector('.f-legs6'), forced = v.gn && !isGnNarrow(v);   // при GN (без тясна маса) 6 крака са задължителни
-        l6.disabled = forced; if(forced) l6.checked = true; l6.title = forced ? "При стелаж за GN масата е с 6 крака" : ""; }
+        l6.disabled = forced; if(forced) l6.checked = true; l6.title = forced ? "При стелаж за GN масата е с 6 крака" : "";
+        // по вида на масата: опциите без смисъл се скриват (6 крака при „Маса с 6 крака“ е ясно; при GN — задължително)
+        const hide = (t.tpl && t.tpl.hide) || [];
+        l6.closest('label').style.display = hide.includes("legs6") || forced ? "none" : "";
+        t.card.querySelector('.f-gn').closest('label').style.display = hide.includes("gn") ? "none" : ""; }
       if(v.gn){ const g = tableGeo(v, PRICE), mn = gnMins(v);
         t.card.querySelector('.f-gnSideBox').style.display = "none";
         t.card.querySelector('.f-D').min = mn.D; t.card.querySelector('.f-L').min = mn.L;
@@ -692,7 +686,6 @@
       t.card.querySelector('.f-midBox').style.display = v.midOn?"block":"none";
       t.card.querySelector('.f-mid2info').textContent = v.midOn ? "(≈ "+v.mid2H+" мм от пода)" : "";
       drawBlueprint(v, t.card.querySelector('.draw'), PRICE);
-      markChips(t);
       t.specText = tableSpec(v, i+1);
       t.problems = t.picked ? tableProblems(v) : ["Не е избран вид маса — изберете от картинките или „Започни от нулата“."];
       { const box = t.card.querySelector('.f-errors'); box.hidden = !t.problems.length;
@@ -943,7 +936,7 @@
     return tables.map(t=>{
       const v=t.vals;
       return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
-        splashOn:v.splashOn, splashH:v.splashH, hemDir:v.hemDir, hem:v.hem, legBack:v.legBack,
+        splashOn:v.splashOn, splashH:v.splashH, hemDir:v.hemDir, hem:v.hem, legBack:v.legBack, splashBack:v.splashBack,
         baseOn:v.baseOn, baseH:v.baseH, midOn:v.midOn, mid2H:v.mid2H, notes:v.notes,
         advOn:v.advOn, topEdge:v.topEdge, baseEdge:v.baseEdge, midEdge:v.midEdge, topRet:v.topRet, baseRet:v.baseRet, midRet:v.midRet,
         legSpan:v.legSpan, legFL:v.legFL, legFR:v.legFR, legBL:v.legBL, legBR:v.legBR,

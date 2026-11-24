@@ -53,11 +53,7 @@
   .tplFree{justify-content:center;border-style:dashed} .tplCard .tplPlus{font-size:34px;line-height:1;color:var(--brand)!important;font-weight:300;margin:14px 0 6px}
   .tplChosen{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#eef5ff;border:1px solid #c7d8f2;border-radius:10px;padding:8px 12px;margin:2px 0 12px;font-size:14px}
   .tplChange{background:none;border:1.5px solid var(--brand);color:var(--brand-dark);border-radius:8px;padding:6px 10px;font:inherit;font-weight:700;cursor:pointer;white-space:nowrap}
-  .tplBox[hidden],.tplChosen[hidden],.tblBody[hidden]{display:none}
-  .chips{display:flex;flex-wrap:wrap;gap:6px;margin:6px 0 2px}
-  .chip{background:#fff;border:1.5px solid #cfdcf0;border-radius:999px;padding:5px 11px;font:inherit;font-size:13px;font-weight:600;color:var(--ink);cursor:pointer}
-  @media (max-width:560px){ .chips{gap:5px} .chip{padding:4px 9px;font-size:12px} }
-  .chip.on{background:var(--brand);border-color:var(--brand);color:#fff}
+  .tplBox[hidden],.tplChosen[hidden],.tblBody[hidden],#afterTables[hidden]{display:none}
   .toggle{display:flex;align-items:center;gap:9px;margin:12px 0;font-size:15px;font-weight:600;cursor:pointer}
   .toggle input{width:20px;height:20px;accent-color:var(--brand);flex:0 0 auto}
   .sub{margin-left:29px;margin-top:-4px}
@@ -99,6 +95,8 @@
   <div id="tables"></div>
 
   <button class="addBtn" id="addTable" type="button">Добави друга маса</button>
+
+  <div id="afterTables" hidden>
 
   <div class="toprow">
     <button class="btn btn-calc" id="calc" type="button">Калкулирай цена</button>
@@ -142,6 +140,7 @@
     </div>
     <div class="ok" id="ok"></div>
     <p class="hint" style="text-align:center;margin-top:8px">След изпращане ние ще се свържем с вас за потвърждение и цена.</p>
+  </div>
   </div>
 </div>
 <footer>Цветих 7 ООД · <b>konvektomat.store</b> <span class="hint">· build __BUILD__</span></footer>

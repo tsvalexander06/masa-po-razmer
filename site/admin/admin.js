@@ -91,7 +91,7 @@
 
   /* ---------- order data ---------- */
   const TABLE_DEFAULT = { qty:1, L:1200, D:600, H:850, thickness:1.5, legProfile:30, splashOn:true, splashH:100,
-                          legBack:70, baseOn:true, baseH:150, midOn:false, notes:"",
+                          legBack:70, splashBack:0, baseOn:true, baseH:150, midOn:false, notes:"",
                           // допълнителни (0 = стандартно, от „Настройки“); shelfEdge — от по-стари поръчки (основа и междинен)
                           advOn:false, topEdge:0, shelfEdge:0, baseEdge:0, midEdge:0, topRet:0, baseRet:0, midRet:0,
                           legSpan:0, legFL:0, legFR:0, legBL:0, legBR:0,
@@ -265,7 +265,7 @@
     const s = JSON.stringify([o.name || "", o.phone || "", o.created || "", (o.tables || []).map(t =>
       [+t.qty || 1, +t.L || 0, +t.D || 0, +t.H || 0, !!t.splashOn, +t.splashH || 0, +t.legBack || 0, !!t.baseOn, +t.baseH || 0, !!t.midOn]
         .concat(["topEdge","shelfEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan","legFL","legFR","legBL","legBR","hem"].map(k => +t[k] || 0), [t.hemDir || ""],
-          +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], isFrame(t) ? ["frame"] : [],
+          +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], t.splashOn && +t.splashBack ? ["sb", +t.splashBack] : [], isFrame(t) ? ["frame"] : [],
           t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0, +t.gnLevels || 0, +t.gnPitch || 0] : [], t.gn ? ["gn", t.gnSide || "left", +t.gnLevels || 0, +t.gnPitch || 0] : []))]);
     let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
     return h.toString(36) + s.length.toString(36);
@@ -414,7 +414,7 @@
   /* ---------- edit view: the tables like on the customer's document (3D drawing + fields) ---------- */
   const FIELDS = [
     ["qty","Брой еднакви маси","бр."], ["L","Дължина","мм"], ["D","Дълбочина","мм"], ["H","Височина","мм"],
-    ["legBack","Задни крака от ръба","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
+    ["legBack","Задни крака от ръба","мм"], ["splashBack","Задни крака от ръба (с борд; 0 = най-отзад)","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
   ];
   // допълнителни настройки: празно = стандартно (стандартът се вижда в полето)
   const ADV_FIELDS = [
@@ -447,7 +447,7 @@
         '<div><div class="grid">' +
         FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
         '</div><div class="chks">' +
-        '<label class="chk"><input type="checkbox" data-k="splashOn"' + (t.splashOn ? " checked" : "") + dis + '> Борд</label>' +
+        '<label class="chk"><input type="checkbox" data-k="splashOn"' + (t.splashOn ? " checked" : "") + dis + '> Заден борд</label>' +
         '<span class="hemctl"><label>Подгъвка на борда<select data-k="hemDir"' + dis + '>' +
           [["wall","към стената (в дълбочината)"],["front","напред"],["none","без"]].concat(!t.hemDir ? [["","към стената, извън дълбочината (стара поръчка)"]] : [])
             .map(([v,l]) => '<option value="' + v + '"' + ((t.hemDir || "") === v ? " selected" : "") + '>' + l + '</option>').join("") + '</select></label>' +
@@ -687,10 +687,12 @@
     if(fc){ fc.checked = isFrame(t); fc.disabled = order.stage !== "new" || has6(t) || +t.L > 1500; fc.title = has6(t) || +t.L > 1500 ? "Масата с 6 крака или над 1500 мм е винаги с рамка от профил" : ""; }
     if(isFrame(t)) card.querySelectorAll('[data-adv="topRet"],[data-adv="baseRet"],[data-adv="midRet"]').forEach(e => e.hidden = true);   // тави: без сгъвка навътре
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
-    // с борд задният ръб не опира в стената — отстоянието на задните крака не се ползва
-    const lb = card.querySelector('[data-k="legBack"]');
-    if(lb){ lb.disabled = order.stage !== "new" || t.splashOn || +t.legSpan > 0;
-      lb.title = t.splashOn ? "Не се ползва при борд" : +t.legSpan > 0 ? "Задава се от разстоянието между краката" : ""; }
+    // задни крака: без борд — legBack (мин. зад сгъвката); с борд — splashBack (0 = най-отзад)
+    const lb = card.querySelector('[data-k="legBack"]'), sb = card.querySelector('[data-k="splashBack"]');
+    if(lb){ lb.disabled = order.stage !== "new" || +t.legSpan > 0; lb.closest('label').style.display = t.splashOn ? "none" : "";
+      lb.title = +t.legSpan > 0 ? "Задава се от разстоянието между краката" : ""; }
+    if(sb){ sb.disabled = order.stage !== "new" || +t.legSpan > 0; sb.closest('label').style.display = t.splashOn ? "" : "none";
+      sb.title = +t.legSpan > 0 ? "Задава се от разстоянието между краката" : ""; }
   }
 
   /* ===== ГЕОМЕТРИЯ НА МАСАТА — ДРЪЖ ИДЕНТИЧНО в site/app.js и site/admin/admin.js =====
@@ -739,7 +741,7 @@
     if(gnDirect && !num(t.sideL) && !num(t.sideR)){ const sd = ((+t.L || 0) - 2 * gnProf - gnGap) / 2; if(sd >= 1){ sideL = sideR = Math.round(sd * 10) / 10; } }
     const side = sideL;
     const minBack = frame ? fg : t.splashOn ? 0 : rT;  // без борд: зад сгъвката; с борд задът е свободен; рамка: в тавата
-    let back = t.splashOn ? minBack : Math.max(minBack, +t.legBack || 0);
+    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack (0 = най-отзад)
     let span = Dp - front - back;
     if(num(t.legSpan)){ span = num(t.legSpan); back = Dp - front - span; }
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
