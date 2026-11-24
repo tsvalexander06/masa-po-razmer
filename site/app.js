@@ -880,25 +880,25 @@
   }
 
   /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО в app.js и admin/admin.js =====
-     Цена = (лист + тръба по дължина + заварки + огъвания + тапички) × (1 + надценка%).
+     Цена = (лист + тръба + винкели + тапички) × (1 + надценка%) + трудът без надценка (заварки, огъвания).
      - лист: всяка маса се смята сама, все едно се реже от НОВИ листове. Лист, зает над 2/3
        (PRICE.fullSheetAt), се плаща цял; под 2/3 — само използваната ламарина (площта на заготовките
        × цената на м² от този лист). Избира се най-евтината комбинация от PRICE.sheets. В „Разкрой“ реалният
        разкрой си ползва фирата от склада — това не променя цената.
      - тръба: дължина на краката × PRICE.tubeM (€/м)
-     - заварки: 0,50 €/см, БЕЗ надценка — шев на тръба 30×30 = 12 см, на винкел 20×20 за GN = 4 см
+     - ТРУДЪТ Е БЕЗ НАДЦЕНКА: заварки 0,50 €/см (шев на тръба 30×30 = 6 см, на винкел 20×20 за GN = 4 см) и огъвания 0,50 €
      - огъвания: 0.5€ на огъване */
   const PRICE = {
     sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
     fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
     weldPerCm: 0.5,     // € на см заварка — фиксирано, БЕЗ надценка (за всички маси)
-    weldTubeCm: 12,     // шев на тръба 30×30 = обиколката (12 см)
+    weldTubeCm: 6,      // шев на тръба 30×30 (крак, царга, профил) — 6 см
     weldAngleCm: 4,     // шев на края на винкел 20×20 за GN (2 + 2 см)
     kerf: 3,            // мм между заготовките при рязане
     angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
-    bend: 1,            // € за огъване (90°)
+    bend: 0.5,          // € за огъване (90°) — без надценка
     capEach: 3,         // € за тапичка на крак (4 на маса)
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
@@ -972,12 +972,12 @@
     const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM + pAngleM(t)*PRICE.angleM,
           weld=pWeldCm(t)*PRICE.weldPerCm, bend=pBends(t)*PRICE.bend;   // заварките — извън надценката
     const caps=((has6(t)?6:4)+(tableGeo(t,PRICE).gnPosts.length?2:0))*PRICE.capEach;   // тапички на краката (и на стойките за GN)
-    return { mat, tube, weld, bend, caps, base:mat+tube+bend };   // base — с надценка; weld — без
+    return { mat, tube, weld, bend, caps, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
   }
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.weld;   // заварките — фиксирано, без надценка
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour;   // заварките — фиксирано, без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;

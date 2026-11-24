@@ -110,19 +110,19 @@
   const mid2H = t => Math.round((t.baseH + Math.max(0, t.H - 40)) / 2);
 
   /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО с site/app.js =====
-     Цена = (лист + тръба + заварки + огъвания + тапички) × (1 + надценка%).
+     Цена = (лист + тръба + винкели + тапички) × (1 + надценка%) + трудът без надценка (заварки 0,50 €/см, огъвания 0,50 €).
      Лист: всяка маса — цели НОВИ листове (pSheets), без приспадане на фирата; разкроят ползва фирата отделно. */
   const PRICE = {
     sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
     fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
     weldPerCm: 0.5,     // € на см заварка — фиксирано, БЕЗ надценка (за всички маси)
-    weldTubeCm: 12,     // шев на тръба 30×30 = обиколката (12 см)
+    weldTubeCm: 6,      // шев на тръба 30×30 (крак, царга, профил) — 6 см
     weldAngleCm: 4,     // шев на края на винкел 20×20 за GN (2 + 2 см)
     kerf: 3,            // мм между заготовките при рязане
     angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
-    bend: 1,            // € за огъване (90°)
+    bend: 0.5,          // € за огъване (90°) — без надценка
     capEach: 3,         // € за тапичка на крак (4 на маса)
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
@@ -196,12 +196,12 @@
     const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM + pAngleM(t)*PRICE.angleM,
           weld=pWeldCm(t)*PRICE.weldPerCm, bend=pBends(t)*PRICE.bend;   // заварките — извън надценката
     const caps=((has6(t)?6:4)+(tableGeo(t,PRICE).gnPosts.length?2:0))*PRICE.capEach;   // тапички на краката (и на стойките за GN)
-    return { mat, tube, weld, bend, caps, base:mat+tube+bend };   // base — с надценка; weld — без
+    return { mat, tube, weld, bend, caps, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
   }
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.weld;   // заварките — фиксирано, без надценка
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour;   // заварките — фиксирано, без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
@@ -1373,7 +1373,7 @@
        Cost (себестойност) = materials + labour, from the same formula as the client price:
          materials: each table as if cut from NEW whole sheets (pSheets — the offcut is not taken off), a designer part by
          its area (€/м²), tube by length, leg caps; labour: welds + bends. The cutting plan itself still uses the offcuts.
-       Client price = cost × (1 + markupPct) → the profit is always markupPct of the cost.
+       Client price = materials × (1 + markupPct) + labour (welds + bends, not marked up).
        The whole sheets to buy are shown apart: what is left of them goes to the offcut store. */
     let matOurs = 0, tubeOurs = 0, weldOurs = 0, bendOurs = 0, capsOurs = 0;
     o.tables.forEach(t => { const pp = priceParts(t), q = t.qty;
@@ -1636,7 +1636,7 @@
         '<div><span>Труд: заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
         '<div><span>Труд: огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
         '<div><span>Себестойност общо</span><b>' + esc(eur2(P.costTotal)) + '</b></div>' +
-        '<div><span>Печалба (' + PRICE.markupPct + '% надценка, без заварките)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
+        '<div><span>Печалба (' + PRICE.markupPct + '% надценка върху материалите)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
       '</div>' +
       (P.buy != null ? '<div class="muted" style="margin-top:6px">За купуване: ' + P.buySheets + (P.buySheets === 1 ? ' нов лист' : ' нови листа') +
         (P.buyBars ? ' + ' + P.buyBars + (P.buyBars === 1 ? ' прът' : ' пръта') + ' тръба' : '') + ' = <b>' + esc(eur2(P.buy)) + '</b> (цели листове — остатъкът им отива във фирата; не е себестойност на поръчката).</div>' : '');
@@ -1867,7 +1867,7 @@
   });
 
   // цената и себестойността на поръчка по ТЕКУЩАТА формула — същите суми като в долната лента, без разкроя
-  const PRICE_V = "2026-11-24";   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
+  const PRICE_V = "2026-11-24b";   // труд без надценка; шев на крак 6 см; огъване 0,50 €   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
   function orderPriceSnap(o){
     let mat = 0, tube = 0, weld = 0, bend = 0, caps = 0;
     (o.tables || []).map(normTable).forEach(t => { const pp = priceParts(t), q = t.qty;
@@ -2556,7 +2556,7 @@
   // client price of a part: like the tables — blank area + bends, with the markup (no welds)
   function partPrice(p){
     const g = partGeo(p);
-    return (Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) + g.bends * PRICE.bend) * (1 + PRICE.markupPct / 100) * p.qty;
+    return (Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) * (1 + PRICE.markupPct / 100) + g.bends * PRICE.bend) * p.qty;   // огъванията — без надценка
   }
   // цената преди отстъпката (маси + детайли + елементи)
   function orderGross(o){
