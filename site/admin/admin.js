@@ -909,6 +909,7 @@
     }
 
     let miX=1e9,maX=-1e9,miY=1e9,maY=-1e9;
+    if(v.noDims) for(let i=shapes.length-1;i>=0;i--) if(['dim','text','ext','cap'].includes(shapes[i].t)) shapes.splice(i,1);   // само масата (за картите на шаблоните)
     shapes.forEach(s=>{(s.pts?s.pts:[s.p]).forEach(p=>{miX=Math.min(miX,p.x);maX=Math.max(maX,p.x);miY=Math.min(miY,p.y);maY=Math.max(maY,p.y);});});
     const VW=560,VH=420,pad=46;
     const sc=Math.min((VW-2*pad)/(maX-miX),(VH-2*pad)/(maY-miY));

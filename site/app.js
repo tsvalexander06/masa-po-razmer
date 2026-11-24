@@ -21,6 +21,12 @@
   /* ---------- per-table template ---------- */
   const TPL = `
     <h2><span class="num" style="margin-right:auto">Маса</span><button class="rm" type="button">✕ Премахни</button></h2>
+    <div class="tplBox">
+      <div class="tplHead"><b>Изберете вид маса</b><span class="hint">после нагласете размерите и опциите — всичко се променя</span></div>
+      <div class="tplGrid"></div>
+    </div>
+    <div class="tplChosen" hidden><span>Вид: <b class="tplName"></b></span><button class="tplChange" type="button">Смени вида</button></div>
+    <div class="tblBody">
 
     <div class="tblErr f-errors" hidden></div>
     <h3>Чертеж (3D изглед)</h3>
@@ -31,14 +37,17 @@
       <div>
         <label>Дължина <span class="hint">(мм)</span></label>
         <input type="number" class="f-L" value="1200" min="300" max="2400" step="10">
+        <div class="chips" data-for="L"></div>
       </div>
       <div>
         <label>Дълбочина <span class="hint">(мм)</span></label>
         <input type="number" class="f-D" value="600" min="300" max="1200" step="10">
+        <div class="chips" data-for="D"></div>
       </div>
     </div>
     <label>Височина <span class="hint">(мм)</span></label>
     <input type="number" class="f-H" value="850" min="400" max="1200" step="10">
+    <div class="chips" data-for="H"></div>
 
     <label class="toggle"><input type="checkbox" class="f-splashOn"> С борд (кант отзад)</label>
     <div class="sub f-splashBox">
@@ -149,7 +158,66 @@
         <p class="info">Профилът на краката е <b>30 × 30 мм</b>.</p>
       </div>
     </div>
+    </div>
   `;
+
+  /* ---------- шаблони: често поръчвани маси (размерите са само начални — клиентът ги сменя) ---------- */
+  const TEMPLATES = [
+    { id:"work",    name:"Работна маса",               desc:"Плот и долен плот за съхранение",              v:{ L:800, D:600 } },
+    { id:"wall",    name:"Маса до стена с борд",       desc:"Борд отзад до стената и долен плот",           v:{ L:1800, D:700, splashOn:true } },
+    { id:"two",     name:"Маса с два долни плота",     desc:"Долен и междинен плот — повече място",          v:{ L:1200, D:600, midOn:true } },
+    { id:"under",   name:"Маса за уред отдолу",        desc:"Без долен плот — за хладилник, кош, машина",    v:{ L:1200, D:700, baseOn:false } },
+    { id:"stand",   name:"Стойка за уред",             desc:"Ниска маса за конвектомат, фурна, котлон",      v:{ L:900, D:700, H:600 }, chips:{ L:[600, 800, 900, 1000, 1200], H:[500, 600, 700, 800] } },
+    { id:"standgn", name:"Стойка за конвектомат с GN", desc:"Ниска, със стелаж за тави GN 1/1 отдолу",       v:{ L:900, D:700, H:700, gn:true }, chips:{ L:[800, 900, 1000, 1200], D:[700, 800], H:[600, 700, 800] } },
+    { id:"gn",      name:"Тясна маса със стелаж GN",   desc:"Тавите GN 1/1 влизат между двата крака",        v:{ L:420, D:650, baseOn:false, gn:true }, chips:{ L:[410, 420, 450, 500], D:[650, 700, 800] } },
+    { id:"six",     name:"Маса с 6 крака",             desc:"Дълга маса, долен плот в едната част",          v:{ L:2000, D:700, splashOn:true, legs6:true } },
+  ];
+  const TPL_BASE = { L:1200, D:600, H:850, splashOn:false, baseOn:true, midOn:false, legs6:false, gn:false, legBack:70, baseH:150 };
+  const CHIPS = { L:[600, 800, 1000, 1200, 1500, 1800, 2000, 2400], D:[500, 600, 700, 800], H:[800, 850, 900] };
+  // малка картинка на шаблона — само масата, без размери
+  function tplPicture(svg, tp){
+    const v = Object.assign({ splashH:100, hemDir:"wall", hem:20, legProfile:30, notes:"", shelfSide:"left", bayL:0, rails:false, railH:0, noDims:true }, TPL_BASE, tp.v);
+    v.mid2H = Math.round((v.baseH + Math.max(0, v.H - 40)) / 2);
+    if(has6(v)) v.legs6 = true;
+    drawBlueprint(v, svg, PRICE);
+  }
+  function applyTemplate(t, tp){
+    const q = s => t.card.querySelector(s), v = Object.assign({}, TPL_BASE, tp ? tp.v : {});
+    q('.f-L').value = v.L; q('.f-D').value = v.D; q('.f-H').value = v.H;
+    q('.f-splashOn').checked = v.splashOn; q('.f-baseOn').checked = v.baseOn || v.midOn; q('.f-midOn').checked = v.midOn;
+    q('.f-legs6').checked = v.legs6; q('.f-gn').checked = v.gn; q('.f-legBack').value = v.legBack; q('.f-baseH').value = v.baseH;
+    q('.f-advOn').checked = false; q('.f-bayL').value = ""; q('.f-gnLevels').value = ""; q('.f-gnPitch').value = 120;
+    t.tpl = tp || null; t.picked = true;
+    if(v.gn){ const mn = gnMins(readTable(t)); if(+q('.f-D').value < mn.D) q('.f-D').value = mn.D; }
+    showTplState(t); renderAll();
+    t.card.querySelector('.tplChosen').scrollIntoView({ behavior:"smooth", block:"start" });
+  }
+  function showTplState(t){
+    const q = s => t.card.querySelector(s);
+    q('.tplBox').hidden = !!t.picked; q('.tplChosen').hidden = !t.picked; q('.tblBody').hidden = !t.picked;
+    q('.tplName').textContent = t.tpl ? t.tpl.name : "по ваш избор";
+    // бутоните с размери — според вида (стойка: по-ниски височини, тясна GN маса: тесни дължини)
+    ["L", "D", "H"].forEach(k => {
+      const box = q('.chips[data-for="' + k + '"]'), list = (t.tpl && t.tpl.chips && t.tpl.chips[k]) || CHIPS[k];
+      box.innerHTML = list.map(n => '<button type="button" class="chip" data-v="' + n + '">' + n + '</button>').join("");
+    });
+    markChips(t);
+  }
+  function markChips(t){
+    ["L", "D", "H"].forEach(k => { const val = +t.card.querySelector('.f-' + k).value;
+      t.card.querySelectorAll('.chips[data-for="' + k + '"] .chip').forEach(c => c.classList.toggle("on", +c.dataset.v === val)); });
+  }
+  function buildPicker(t){
+    const grid = t.card.querySelector('.tplGrid');
+    grid.innerHTML = TEMPLATES.map(tp => '<button type="button" class="tplCard" data-tpl="' + tp.id + '"><svg class="tplPic" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"></svg>' +
+      '<b>' + esc(tp.name) + '</b><span>' + esc(tp.desc) + '</span></button>').join("") +
+      '<button type="button" class="tplCard tplFree" data-tpl=""><span class="tplPlus">+</span><b>Започни от нулата</b><span>Обикновена маса — настройвате всичко сами</span></button>';
+    grid.querySelectorAll('.tplCard[data-tpl]').forEach(btn => {
+      const tp = TEMPLATES.find(x => x.id === btn.dataset.tpl);
+      if(tp) tplPicture(btn.querySelector('svg'), tp);
+      btn.addEventListener('click', () => applyTemplate(t, tp || null));
+    });
+  }
 
   function createTable(){
     seq++;
@@ -186,6 +254,15 @@
       card.remove();
       renderAll();
     });
+    // шаблони: избор на вида, после лесно нагласяне с бутони за размерите
+    buildPicker(t);
+    card.querySelector('.tplChange').addEventListener('click', () => { t.picked = false; showTplState(t); card.scrollIntoView({ behavior:"smooth", block:"start" }); });
+    card.querySelectorAll('.chips').forEach(box => box.addEventListener('click', e => {
+      const c = e.target.closest('.chip'); if(!c) return;
+      const inp = card.querySelector('.f-' + box.dataset.for); inp.value = c.dataset.v;
+      inp.dispatchEvent(new Event('change')); renderAll();
+    }));
+    showTplState(t);
     tables.push(t);
     renderAll();
     return t;
@@ -504,6 +581,7 @@
     }
 
     let miX=1e9,maX=-1e9,miY=1e9,maY=-1e9;
+    if(v.noDims) for(let i=shapes.length-1;i>=0;i--) if(['dim','text','ext','cap'].includes(shapes[i].t)) shapes.splice(i,1);   // само масата (за картите на шаблоните)
     shapes.forEach(s=>{(s.pts?s.pts:[s.p]).forEach(p=>{miX=Math.min(miX,p.x);maX=Math.max(maX,p.x);miY=Math.min(miY,p.y);maY=Math.max(maY,p.y);});});
     const VW=560,VH=420,pad=46;
     const sc=Math.min((VW-2*pad)/(maX-miX),(VH-2*pad)/(maY-miY));
@@ -614,8 +692,9 @@
       t.card.querySelector('.f-midBox').style.display = v.midOn?"block":"none";
       t.card.querySelector('.f-mid2info').textContent = v.midOn ? "(≈ "+v.mid2H+" мм от пода)" : "";
       drawBlueprint(v, t.card.querySelector('.draw'), PRICE);
+      markChips(t);
       t.specText = tableSpec(v, i+1);
-      t.problems = tableProblems(v);
+      t.problems = t.picked ? tableProblems(v) : ["Не е избран вид маса — изберете от картинките или „Започни от нулата“."];
       { const box = t.card.querySelector('.f-errors'); box.hidden = !t.problems.length;
         box.innerHTML = t.problems.length ? '<b>Тази маса не може да се направи така:</b><ul>' + t.problems.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul>' : ""; }
     });
@@ -639,6 +718,8 @@
     $("promoBox").hidden=!priceShown;   // промокодът — под цената, след „Калкулирай цена“
     if(!priceShown){ box.hidden=true; return; }
     box.hidden=false;
+    const unpicked=tables.map((t,i)=>t.picked?0:i+1).filter(Boolean);
+    if(unpicked.length){ box.innerHTML='<div class="pbad">Няма цена: изберете вида на '+(unpicked.length>1?'масите '+unpicked.join(", "):'маса '+unpicked[0])+' (или „Започни от нулата“).</div>'; return; }
     const bad=tables.map((t,i)=>t.problems&&t.problems.length?i+1:0).filter(Boolean);
     if(bad.length){ box.innerHTML='<div class="pbad">Няма цена: '+(bad.length>1?'масите '+bad.join(", ")+' не могат':'маса '+bad[0]+' не може')+' да се направи с тези размери. Вижте червеното поле при '+(bad.length>1?'тях':'нея')+'.</div>'; return; }
     const p=o&&o.price;
@@ -799,6 +880,7 @@
   // невъзможна маса → нищо не се изпраща; показва се къде е проблемът
   function blockIfProblems(){
     const t=tables.find(x=>x.problems&&x.problems.length); if(!t) return false;
+    if(!t.picked){ $("ok").textContent="Изберете вида на маса "+(tables.indexOf(t)+1)+" (или „Започни от нулата“)."; t.card.scrollIntoView({behavior:"smooth", block:"start"}); return true; }
     $("ok").textContent="Поправете размерите в червеното поле на маса "+(tables.indexOf(t)+1)+" — така масата не може да се направи.";
     t.card.querySelector('.f-errors').scrollIntoView({behavior:"smooth", block:"center"}); return true;
   }
