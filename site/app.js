@@ -62,9 +62,9 @@
     </div>
 
     <div class="f-legBackBox">
-      <label>Отстояние на задните крака от задния ръб (стената) <span class="hint f-legBackHint">(мм, мин. 12 мм)</span></label>
-      <input type="number" class="f-legBack" value="70" min="12" max="400" step="1">
-      <input type="number" class="f-splashBack" value="0" min="0" max="400" step="1">
+      <label>Отстояние на задните крака от задния ръб (стената) <span class="hint">(мм, мин. 50 мм)</span></label>
+      <input type="number" class="f-legBack" value="70" min="50" max="400" step="1">
+      <input type="number" class="f-splashBack" value="50" min="50" max="400" step="1">
     </div>
 
     <label class="toggle"><input type="checkbox" class="f-legs6"> 6 крака (още един чифт крака по средата)</label>
@@ -183,7 +183,7 @@
     const q = s => t.card.querySelector(s), v = Object.assign({}, TPL_BASE, tp ? tp.v : {});
     q('.f-L').value = v.L; q('.f-D').value = v.D; q('.f-H').value = v.H;
     q('.f-splashOn').checked = v.splashOn; q('.f-baseOn').checked = v.baseOn || v.midOn; q('.f-midOn').checked = v.midOn;
-    q('.f-legs6').checked = v.legs6; q('.f-gn').checked = v.gn; q('.f-legBack').value = v.legBack; q('.f-splashBack').value = 0; q('.f-baseH').value = v.baseH;
+    q('.f-legs6').checked = v.legs6; q('.f-gn').checked = v.gn; q('.f-legBack').value = v.legBack; q('.f-splashBack').value = PRICE.backMin; q('.f-baseH').value = v.baseH;
     q('.f-advOn').checked = false; q('.f-bayL').value = ""; q('.f-gnLevels').value = ""; q('.f-gnPitch').value = 120;
     t.tpl = tp || null; t.picked = true;
     if(v.gn){ const mn = gnMins(readTable(t)); if(+q('.f-D').value < mn.D) q('.f-D').value = mn.D; }
@@ -292,8 +292,8 @@
       L:+q('.f-L').value||0, D:+q('.f-D').value||0, H,
       splashOn:q('.f-splashOn').checked, splashH:+q('.f-splashH').value||0,
       hemDir:q('.f-hemDir').value, hem:q('.f-hemDir').value==="none" ? 0 : Math.min(60, Math.max(10, Math.round(+q('.f-hem').value||20))),
-      legBack:Math.max(12, +q('.f-legBack').value||0),   // минимум 12 мм (зад перото 12 мм)
-      splashBack:Math.max(0, Math.min(400, +q('.f-splashBack').value||0)),   // с борд: 0 = краката опират отзад
+      legBack:Math.max(PRICE.backMin, +q('.f-legBack').value||0),   // минимум 50 мм от задния ръб
+      splashBack:Math.max(PRICE.backMin, Math.min(400, +q('.f-splashBack').value||0)),   // с борд — също мин. 50 мм
       baseOn:q('.f-baseOn').checked, baseH,
       midOn:q('.f-midOn').checked, mid2H,
       notes:q('.f-notes').value.trim(),
@@ -394,8 +394,9 @@
     const gnDirect = !!t.gn && !has6(t);
     if(gnDirect && !num(t.sideL) && !num(t.sideR)){ const sd = ((+t.L || 0) - 2 * gnProf - gnGap) / 2; if(sd >= 1){ sideL = sideR = Math.round(sd * 10) / 10; } }
     const side = sideL;
-    const minBack = frame ? fg : t.splashOn ? 0 : rT;  // без борд: зад сгъвката; с борд задът е свободен; рамка: в тавата
-    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack (0 = най-отзад)
+    // задните крака: поне D.backMin (50 мм) от задния ръб; без борд и зад сгъвката, при рамка — в тавата
+    const minBack = Math.max(frame ? fg : t.splashOn ? 0 : rT, num(D.backMin));
+    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack, без борд: legBack
     let span = Dp - front - back;
     if(num(t.legSpan)){ span = num(t.legSpan); back = Dp - front - span; }
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
@@ -602,8 +603,7 @@
     s+="Борд:       "+(v.splashOn?"ДА ("+v.splashH+" мм)":"НЕ")+"\n";
     if(v.splashOn) s+="Подгъвка на борда: "+(v.hemDir==="wall" ? v.hem+" мм към стената (включена в дълбочината "+v.D+" мм; плот "+(v.D-v.hem)+" мм)"
                                           : v.hemDir==="front" ? v.hem+" мм напред" : "НЕ")+"\n";
-    if(!v.splashOn) s+="Задни крака отстояние от ръба: "+v.legBack+" мм\n";
-    else if(v.splashBack) s+="Задни крака отстояние от ръба: "+v.splashBack+" мм\n";
+    s+="Задни крака отстояние от ръба: "+(v.splashOn ? v.splashBack : v.legBack)+" мм\n";
     if(v.legs6){ const g = tableGeo(v, PRICE);
       s+="Крака:      6 (среден чифт на "+(Math.round(g.shL*10)/10)+" мм от "+(g.right?"десните":"левите")+" крака, външно)\n";
       if(v.rails && !v.gn) s+="Профили в празната част: отзад и отстрани, на "+v.railH+" мм от пода (отпред е отворено)\n";
@@ -653,7 +653,6 @@
       t.card.querySelector('.f-legBackBox').style.display = v.legSpan ? "none" : "block";
       t.card.querySelector('.f-legBack').style.display = v.splashOn ? "none" : "";
       t.card.querySelector('.f-splashBack').style.display = v.splashOn ? "" : "none";
-      t.card.querySelector('.f-legBackHint').textContent = v.splashOn ? "(мм; 0 = краката са най-отзад)" : "(мм, мин. 12 мм)";
       t.card.querySelector('.f-legs6Box').style.display = v.legs6 ? "block" : "none";
       t.card.querySelector('.f-railBox').style.display = v.rails && !v.gn ? "block" : "none";
       { const rc = t.card.querySelector('.f-rails'); rc.disabled = !!v.gn; if(v.gn) rc.checked = true; }
@@ -974,6 +973,7 @@
     weldTubeCm: 6,      // шев на тръба 30×30 (крак, царга, профил) — 6 см
     weldAngleCm: 4,     // шев на края на винкел 20×20 за GN (2 + 2 см)
     kerf: 3,            // мм между заготовките при рязане
+    backMin: 50,        // мм — задните крака са поне на толкова от задния ръб на плота
     angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
     bend: 0.6,          // € за огъване (90°) — без надценка; +20% от 0,50

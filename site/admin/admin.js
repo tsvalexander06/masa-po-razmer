@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr","econtMode"];   // изпращач за Еконт (текст) + откъде е цената
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:0.6, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5, frameGap:2,
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:0.6, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5, frameGap:2, backMin:50,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -15,6 +15,7 @@
     ["shelfGap","Долен плот — намаление дълбочина","мм (за влизане между краката / заварка)"],
     ["shelfGapW","Долен плот — намаление ширина","мм, общо (за влизане между краката / заварка)"],
     ["frameGap","Рамка — краката от ръба на тавата","мм (рамката влиза в тавата; при „рамка от профил“)"],
+    ["backMin","Задни крака — минимум от задния ръб","мм (с и без борд)"],
     ["feet","Регулируеми крачета","мм височина; 0 = без"],
     ["stretch","Удължение на перото при огъване","мм — перото излиза с толкова по-дълго (в заготовката: перо − това)"],
     ["splashHem","Борд — подгъвка горе","мм, назад към стената; 0 = без"],
@@ -414,7 +415,7 @@
   /* ---------- edit view: the tables like on the customer's document (3D drawing + fields) ---------- */
   const FIELDS = [
     ["qty","Брой еднакви маси","бр."], ["L","Дължина","мм"], ["D","Дълбочина","мм"], ["H","Височина","мм"],
-    ["legBack","Задни крака от ръба","мм"], ["splashBack","Задни крака от ръба (с борд; 0 = най-отзад)","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
+    ["legBack","Задни крака от ръба","мм"], ["splashBack","Задни крака от ръба (с борд)","мм"], ["splashH","Височина на борда","мм"], ["baseH","Долна основа от пода","мм"],
   ];
   // допълнителни настройки: празно = стандартно (стандартът се вижда в полето)
   const ADV_FIELDS = [
@@ -687,7 +688,7 @@
     if(fc){ fc.checked = isFrame(t); fc.disabled = order.stage !== "new" || has6(t) || +t.L > 1500; fc.title = has6(t) || +t.L > 1500 ? "Масата с 6 крака или над 1500 мм е винаги с рамка от профил" : ""; }
     if(isFrame(t)) card.querySelectorAll('[data-adv="topRet"],[data-adv="baseRet"],[data-adv="midRet"]').forEach(e => e.hidden = true);   // тави: без сгъвка навътре
     card.querySelector(".mid2info").textContent = t.midOn ? "(≈ " + mid2H(t) + " мм от пода)" : "";
-    // задни крака: без борд — legBack (мин. зад сгъвката); с борд — splashBack (0 = най-отзад)
+    // задни крака: без борд — legBack; с борд — splashBack (и двете — поне „Задни крака — минимум“ от Настройки)
     const lb = card.querySelector('[data-k="legBack"]'), sb = card.querySelector('[data-k="splashBack"]');
     if(lb){ lb.disabled = order.stage !== "new" || +t.legSpan > 0; lb.closest('label').style.display = t.splashOn ? "none" : "";
       lb.title = +t.legSpan > 0 ? "Задава се от разстоянието между краката" : ""; }
@@ -740,8 +741,9 @@
     const gnDirect = !!t.gn && !has6(t);
     if(gnDirect && !num(t.sideL) && !num(t.sideR)){ const sd = ((+t.L || 0) - 2 * gnProf - gnGap) / 2; if(sd >= 1){ sideL = sideR = Math.round(sd * 10) / 10; } }
     const side = sideL;
-    const minBack = frame ? fg : t.splashOn ? 0 : rT;  // без борд: зад сгъвката; с борд задът е свободен; рамка: в тавата
-    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack (0 = най-отзад)
+    // задните крака: поне D.backMin (50 мм) от задния ръб; без борд и зад сгъвката, при рамка — в тавата
+    const minBack = Math.max(frame ? fg : t.splashOn ? 0 : rT, num(D.backMin));
+    let back = t.splashOn ? Math.max(minBack, num(t.splashBack)) : Math.max(minBack, +t.legBack || 0);   // с борд: splashBack, без борд: legBack
     let span = Dp - front - back;
     if(num(t.legSpan)){ span = num(t.legSpan); back = Dp - front - span; }
     const legAuto = (+t.H || 0) - 1.5 - (+D.feet || 0);
@@ -1049,10 +1051,11 @@
     if(t.L <= 0 || t.D <= 0 || t.H <= 0 || shL <= 0 || shD <= 0 || g.legAuto <= 0)
       warns.push("Размерите са твърде малки за тази конструкция — проверете дължина, дълбочина, височина и отстояния.");
     if(g.back < g.minBack - 0.05)
-      warns.push("Задните крака излизат на " + fmt(g.back) + " мм от задния ръб — " + (t.splashOn ? "извън плота" : "по-малко от сгъвката на плота (" + g.rT + " мм)") +
+      warns.push("Задните крака излизат на " + fmt(g.back) + " мм от задния ръб — по-малко от минимума (" + fmt(g.minBack) + " мм)" +
         ". Намалете разстоянието между предните и задните крака (най-много " + fmt(g.Dp - g.front - g.minBack) + " мм).");
-    if(!t.splashOn && !(+t.legSpan > 0) && (+t.legBack || 0) < g.rT)
-      warns.push("Задните крака са преместени на " + g.rT + " мм от задния ръб — зад сгъвката на плота (" + g.rT + " мм), вместо на " + (+t.legBack || 0) + " мм.");
+    { const want = t.splashOn ? +t.splashBack || 0 : +t.legBack || 0;
+      if(!(+t.legSpan > 0) && want < g.minBack - 0.05 && (want > 0 || !t.splashOn))
+        warns.push("Задните крака са преместени на " + fmt(g.minBack) + " мм от задния ръб (минимумът), вместо на " + want + " мм."); }
     if(t.L > 2400) warns.push("Масата е по-дълга от 2,4 м (" + t.L + " мм) — такива маси не правим.");
     if(g.span < 100) warns.push("Разстоянието между предните и задните крака е само " + fmt(g.span) + " мм.");
     [["работния плот", g.rT], ["долната основа", t.baseOn ? g.rB : 0], ["междинния плот", t.midOn ? g.rM : 0]].forEach(([n, r]) => {
@@ -1874,7 +1877,7 @@
   });
 
   // цената и себестойността на поръчка по ТЕКУЩАТА формула — същите суми като в долната лента, без разкроя
-  const PRICE_V = "2026-11-24c";   // труд без надценка; шев на крак 6 см; заварка 0,60 €/см, огъване 0,60 € (+20%)   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
+  const PRICE_V = "2026-11-24d";   // задните крака — мин. 50 мм от задния ръб   // труд без надценка; шев на крак 6 см; заварка 0,60 €/см, огъване 0,60 € (+20%)   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
   function orderPriceSnap(o){
     let mat = 0, tube = 0, weld = 0, bend = 0, caps = 0;
     (o.tables || []).map(normTable).forEach(t => { const pp = priceParts(t), q = t.qty;
