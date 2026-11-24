@@ -4,7 +4,7 @@
 
   /* ---------- workshop settings ---------- */
   const SENDER_KEYS = ["senderName","senderPhone","senderCity","senderAddr","econtMode"];   // изпращач за Еконт (текст) + откъде е цената
-  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:0.5, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5, frameGap:2,
+  const DEFAULTS = { senderName:"", senderPhone:"", senderCity:"", senderAddr:"", econtMode:"demo", bd90:3, bd180:2, weldPerCm:0.6, topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, feet:0, tubeWall:1.5, frameGap:2,
                      tubeStock:6000, kerf:3, offMin:100, sheetW:2000, sheetH:1000, sheetPrice:90, sheet2W:2500, sheet2H:1250, sheet2Price:140, tubePrice:40 };
   const SETTINGS = [
     ["topEdge","Работен плот — челна дъска","мм, огъната надолу"],
@@ -60,11 +60,12 @@
     if(migrateSettings(s)) try{ localStorage.setItem(KEY, JSON.stringify(s)); }catch(e){}
     return s;
   }
-  // v4: welds half the price (1 → 0.5 €/см for the designer's assemblies; the tables' weld is in PRICE)
+  // v4: welds half the price (1 → 0.5 €/см for the designer's assemblies; the tables' weld is in PRICE); v5: +20% (0.5 → 0.6)
   function migrateSettings(s){
-    if(+s.v >= 4) return false;
-    if(+s.weldPerCm === 1) s.weldPerCm = 0.5;
-    s.v = 4; return true;
+    if(+s.v >= 5) return false;
+    if(!(+s.v >= 4) && +s.weldPerCm === 1) s.weldPerCm = 0.5;
+    if(+s.weldPerCm === 0.5) s.weldPerCm = 0.6;
+    s.v = 5; return true;
   }
   function saveSettings(){ try{ localStorage.setItem(KEY, JSON.stringify(S)); }catch(e){} cloudDirty(); }
   function buildSettings(){
@@ -110,19 +111,19 @@
   const mid2H = t => Math.round((t.baseH + Math.max(0, t.H - 40)) / 2);
 
   /* ===== ЦЕНА ЗА КЛИЕНТА — ДРЪЖ ИДЕНТИЧНО с site/app.js =====
-     Цена = (лист + тръба + винкели + тапички) × (1 + надценка%) + трудът без надценка (заварки 0,50 €/см, огъвания 0,50 €).
+     Цена = (лист + тръба + винкели + тапички) × (1 + надценка%) + трудът без надценка (заварки 0,60 €/см, огъвания 0,60 €).
      Лист: всяка маса — цели НОВИ листове (pSheets), без приспадане на фирата; разкроят ползва фирата отделно. */
   const PRICE = {
     sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
     fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
-    weldPerCm: 0.5,     // € на см заварка — фиксирано, БЕЗ надценка (за всички маси)
+    weldPerCm: 0.6,     // € на см заварка — фиксирано, БЕЗ надценка (за всички маси); +20% от 0,50
     weldTubeCm: 6,      // шев на тръба 30×30 (крак, царга, профил) — 6 см
     weldAngleCm: 4,     // шев на края на винкел 20×20 за GN (2 + 2 см)
     kerf: 3,            // мм между заготовките при рязане
     angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
-    bend: 0.5,          // € за огъване (90°) — без надценка
+    bend: 0.6,          // € за огъване (90°) — без надценка; +20% от 0,50
     capEach: 3,         // € за тапичка на крак (4 на маса)
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
@@ -1867,7 +1868,7 @@
   });
 
   // цената и себестойността на поръчка по ТЕКУЩАТА формула — същите суми като в долната лента, без разкроя
-  const PRICE_V = "2026-11-24b";   // труд без надценка; шев на крак 6 см; огъване 0,50 €   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
+  const PRICE_V = "2026-11-24c";   // труд без надценка; шев на крак 6 см; заварка 0,60 €/см, огъване 0,60 € (+20%)   // сменя се при всяка промяна на формулата → запазените цени се смятат наново
   function orderPriceSnap(o){
     let mat = 0, tube = 0, weld = 0, bend = 0, caps = 0;
     (o.tables || []).map(normTable).forEach(t => { const pp = priceParts(t), q = t.qty;
