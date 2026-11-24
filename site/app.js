@@ -116,7 +116,7 @@
       <input type="number" class="f-baseH" value="150" min="20" max="800" step="10">
     </div>
     <div class="sub f-sinkFrameBox" hidden>
-      <label>Рамка от профил 30×30 долу — височина от пода <span class="hint">(мм, до долния ръб)</span></label>
+      <label>Рамка 30×30 долу — височина от пода <span class="hint">(мм, до долния ръб)</span></label>
       <input type="number" class="f-sinkRailH" value="150" min="20" max="800" step="10">
     </div>
 

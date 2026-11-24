@@ -702,7 +702,7 @@
       ["L","D","splashH","splashOn","midOn","legs6","gn"].forEach(k => { const f = card.querySelector('[data-k="' + k + '"]'); if(f){ if(sk) f.disabled = true; else if(order.stage === "new" && !(k === "legs6" && !!t.gn && !isGnNarrow(t))) f.disabled = false; f.title = sk ? "При мивка се определя от модула и удължението" : f.title; } }); }
     const g6 = tableGeo(t, S);
     const rc = card.querySelector('[data-k="rails"]'); if(rc){ rc.checked = !!t.rails || !!t.gn; rc.disabled = order.stage !== "new" || !!t.gn; rc.title = t.gn ? "При GN рамката долу е задължителна" : ""; }
-    const rh = card.querySelector('[data-k="railH"]'); if(rh) rh.placeholder = t.gn ? "150" : "100";
+    const rh = card.querySelector('.legs6ctl [data-k="railH"]'); if(rh) rh.placeholder = t.gn ? "150" : "100";
     const l6 = card.querySelector('[data-k="legs6"]'), forced6 = !!t.gn && !isGnNarrow(t);   // GN на по-широка маса → 6 крака
     if(l6){ l6.checked = has6(t); l6.disabled = order.stage !== "new" || forced6; l6.title = forced6 ? "При стелаж за GN масата е с 6 крака" : ""; }
     const lc = card.querySelector(".legs6ctl:not(.gnctl)"); if(lc){ lc.hidden = !has6(t); const bi = lc.querySelector('[data-k="bayL"]');
