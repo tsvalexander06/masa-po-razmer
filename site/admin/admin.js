@@ -115,18 +115,22 @@
   const PRICE = {
     sheetM2: 45,        // € за м² — само за детайлите от Конструктора и за заготовка, по-голяма от всеки лист
     sheets: [[2000, 1000, 90], [2500, 1250, 140]],   // нови листове: дължина, ширина (мм), цена (€)
-    fullSheetAt: 2/3,
-    gnWeldShare: 0.3,   // заварките на винкелите за GN — 70% отстъпка: 30% от обикновената цена (4 шева на ниво)   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
+    fullSheetAt: 2/3,   // над тази част от листа се плаща целият лист; под нея — само използваната ламарина
+    weldPerCm: 0.5,     // € на см заварка — фиксирано, БЕЗ надценка (за всички маси)
+    weldTubeCm: 12,     // шев на тръба 30×30 = обиколката (12 см)
+    weldAngleCm: 4,     // шев на края на винкел 20×20 за GN (2 + 2 см)
     kerf: 3,            // мм между заготовките при рязане
     angleM: 25/6,       // € за метър винкел 20×20 (прът 6 м ≈ 25€) — за стелажа за GN
     tubeM: 40/6,        // € за метър тръба 30×30 (прът 6 м = 40€)
-    weldPerFloor: 24,   // € за етаж (плот): 12 см × 4 крака × 0.5€/см
     bend: 1,            // € за огъване (90°)
     capEach: 3,         // € за тапичка на крак (4 на маса)
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
-  const pFloors = t => (isFrame(t) ? tableGeo(t,PRICE).frameJoints/4 : (has6(t)?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0)) + (()=>{ const g=tableGeo(t,PRICE); return g.railJoints/4 + (g.gnAngle ? g.gnLevels * PRICE.gnWeldShare : 0); })();   // профили: 2 на парче; GN: 2 винкела × 2 края на ниво, на половин цена   // 1 етаж = 4 заварки; рамка: 2 на царга
+  // заварки в см: всеки шев на тръба 30×30 (крак, царга, профил) × 12 см + краищата на винкелите за GN × 4 см
+  const pWeldCm = t => { const g=tableGeo(t,PRICE);
+    const joints=(isFrame(t) ? g.frameJoints : 4*((has6(t)?1.5:1) + (t.baseOn?1:0) + (t.midOn?1:0))) + g.railJoints;   // без рамка: 4 шева на плот (6 крака — 6)
+    return joints*PRICE.weldTubeCm + (g.gnAngle ? g.gnLevels*4*PRICE.weldAngleCm : 0); };   // GN: 2 винкела × 2 края на ниво
   const pBends  = t => isFrame(t) ? (3 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):1)) + 4*((t.baseOn?1:0)+(t.midOn?1:0))   // тави: по 1 огъване на страна
                                : (6 + (t.splashOn?(tableGeo(t,PRICE).hem>0?2:1):2)) + 8*((t.baseOn?1:0)+(t.midOn?1:0));
   // заготовките на една маса (мм): плот и долните плотове
@@ -190,14 +194,14 @@
   const pAngleM = t => { const g=tableGeo(t,PRICE); return g.gnAngle ? 2*g.gnLevels*g.gnAngle/1000 : 0; };   // винкели 20×20 за GN
   function priceParts(t){
     const mat=pSheets(t).cost, tube=pTubeM(t)*PRICE.tubeM + pAngleM(t)*PRICE.angleM,
-          weld=pFloors(t)*PRICE.weldPerFloor, bend=pBends(t)*PRICE.bend;
+          weld=pWeldCm(t)*PRICE.weldPerCm, bend=pBends(t)*PRICE.bend;   // заварките — извън надценката
     const caps=((has6(t)?6:4)+(tableGeo(t,PRICE).gnPosts.length?2:0))*PRICE.capEach;   // тапички на краката (и на стойките за GN)
-    return { mat, tube, weld, bend, caps, base:mat+tube+weld+bend };
+    return { mat, tube, weld, bend, caps, base:mat+tube+bend };   // base — с надценка; weld — без
   }
   function priceFor(order){
     if(!order||!order.tables||!order.tables.length) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m;
+    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.weld;   // заварките — фиксирано, без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
@@ -1632,7 +1636,7 @@
         '<div><span>Труд: заварки</span><b>' + esc(eur2(P.weld)) + '</b></div>' +
         '<div><span>Труд: огъвания</span><b>' + esc(eur2(P.bend)) + '</b></div>' +
         '<div><span>Себестойност общо</span><b>' + esc(eur2(P.costTotal)) + '</b></div>' +
-        '<div><span>Печалба (' + PRICE.markupPct + '% надценка)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
+        '<div><span>Печалба (' + PRICE.markupPct + '% надценка, без заварките)</span><b class="' + (diff != null && diff < 0 ? 'neg' : 'pos') + '">' + esc(eur2(diff)) + '</b></div>' +
       '</div>' +
       (P.buy != null ? '<div class="muted" style="margin-top:6px">За купуване: ' + P.buySheets + (P.buySheets === 1 ? ' нов лист' : ' нови листа') +
         (P.buyBars ? ' + ' + P.buyBars + (P.buyBars === 1 ? ' прът' : ' пръта') + ' тръба' : '') + ' = <b>' + esc(eur2(P.buy)) + '</b> (цели листове — остатъкът им отива във фирата; не е себестойност на поръчката).</div>' : '');
@@ -2995,9 +2999,8 @@
     return asm.items.map((it, j) => Object.assign(normPart(JSON.parse(JSON.stringify(it.part))), { qty:it.part.qty * asm.qty, tag:asmTag(ai, j) }));
   }
   function asmPrice(asm){
-    const m = 1 + PRICE.markupPct / 100;
     const parts = asm.items.reduce((a, it) => a + partPrice(Object.assign({}, it.part, { qty:it.part.qty })), 0);
-    const welds = asmJoints(asm).filter(j => j.on).reduce((a, j) => a + j.cm * (+S.weldPerCm || 0), 0) * m;
+    const welds = asmJoints(asm).filter(j => j.on).reduce((a, j) => a + j.cm * (+S.weldPerCm || 0), 0);   // заварките — без надценка, както при масите
     return (parts + welds) * asm.qty;
   }
   // the whole element in 3D (one colour per part, joints marked); `opts.sel` = selected item id
@@ -3185,7 +3188,7 @@
       J.map(j => '<tr><td>Д' + (j.a + 1) + ' ↔ Д' + (j.b + 1) + ' <span class="muted">' + esc(a.items[j.a].part.name + " / " + a.items[j.b].part.name) + '</span></td><td class="size">' + fmt(j.len) + '</td>' +
         '<td><input type="checkbox" data-wk="' + j.key + '"' + (j.on ? " checked" : "") + (ro ? " disabled" : "") + '></td>' +
         '<td><input type="number" min="1" step="1" data-wl="' + j.key + '" value="' + j.cm + '"' + (ro || !j.on ? " disabled" : "") + ' style="width:80px;margin-top:0"></td></tr>').join("") + '</tbody></table></div>' +
-      '<div class="muted" style="margin-top:4px">Детайлите, които се допират, се заваряват по подразбиране. Цена: ' + fmt(S.weldPerCm) + ' €/см (Настройки), с надценката.</div>'
+      '<div class="muted" style="margin-top:4px">Детайлите, които се допират, се заваряват по подразбиране. Цена: ' + fmt(S.weldPerCm) + ' €/см (Настройки), без надценка.</div>'
       : '<div class="muted">Няма допиращи се детайли — поставете ги един до друг („Постави до“), за да се заварят.</div>';
     el.querySelectorAll("[data-wk]").forEach(c => c.addEventListener("change", () => {
       a.welds[c.dataset.wk] = Object.assign({}, a.welds[c.dataset.wk], { on:c.checked }); asmChanged(false);
