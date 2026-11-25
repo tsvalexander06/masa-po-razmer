@@ -3650,7 +3650,150 @@
   }
 
   /* ---------- burger menu / pages ---------- */
-  const PAGES = { work:"Разкрой", processing:"В обработка", pallets:"Палети", designer:"Конструктор", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
+  /* ---------- ГОТОВИ ЧЕРТЕЖИ: изделия, които се правят често (чертеж + разкрой за печат) ----------
+     Стойка за тави за миялна машина: основа — рамка от профил 20×10 (лежи на широката страна),
+     отгоре — прагове от профил 10×10, огънати като трапец, през ~10 см; тавите стоят на ръб между праговете. */
+  const READY = {
+    rack: { name:"Стойка за тави за миялна машина",
+      fields:[["W","Ширина на основата","мм",500], ["D","Дълбочина на основата","мм",500], ["H","Височина на праговете (над рамката)","мм",200],
+              ["top","Горна част на трапеца","мм",300], ["n","Брой прагове","бр.",6], ["bw","Профил на основата — ширина","мм",20], ["bh","Профил на основата — височина","мм",10],
+              ["t","Профил на праговете","мм (квадратен)",10]] }
+  };
+  let RDY_KEY = "rack", RDY = {};
+  const rdyDefaults = k => Object.fromEntries(READY[k].fields.map(f => [f[0], f[3]]));
+  function rackGeo(p){
+    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), H = Math.max(20, +p.H || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
+    const n = Math.max(2, Math.round(+p.n || 2)), top = Math.min(D - 2 * t, Math.max(0, +p.top || 0)), a = (D - top) / 2;   // a — хоризонталното отместване на наклона
+    const slant = Math.hypot(a, H), ang = Math.atan2(H, a) * 180 / Math.PI;            // ъгъл на наклона спрямо основата
+    const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
+    return { W, D, H, t, bw, bh, n, top, a, slant, ang, pitch, gap:pitch - t, xs, dev:2 * slant + top, sideLen:Math.max(0, D - 2 * bw) };
+  }
+  // 3D (изометрия) — същият стил като чертежите на масите
+  function rackSvg(p){
+    const g = rackGeo(p), P = (x, y, z) => ({ x:(x - z) * 0.866, y:(x + z) * 0.5 - y }), quads = [], dims = [];
+    const V = [1, 1, 1];
+    const face = (pts, nrm, fill) => { if(nrm[0] * V[0] + nrm[1] * V[1] + nrm[2] * V[2] <= 0) return;
+      const c = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+      quads.push({ d:c[0] + c[1] + c[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
+    const TOP = "url(#rT)", FR = "url(#rF)", RI = "url(#rR)";
+    const box = (x, y, z, w, h, d) => { const X = x + w, Y = y + h, Z = z + d;
+      face([[x,Y,z],[X,Y,z],[X,Y,Z],[x,Y,Z]], [0,1,0], TOP); face([[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], FR); face([[X,y,z],[X,Y,z],[X,Y,Z],[X,y,Z]], [1,0,0], RI);
+      face([[x,y,z],[x,Y,z],[x,Y,Z],[x,y,Z]], [-1,0,0], RI); face([[x,y,z],[X,y,z],[X,Y,z],[x,Y,z]], [0,0,-1], FR); };
+    // рамката: отпред и отзад по цялата ширина, отстрани — между тях
+    box(0, 0, g.D - g.bw, g.W, g.bh, g.bw); box(0, 0, 0, g.W, g.bh, g.bw);
+    box(0, 0, g.bw, g.bw, g.bh, g.sideLen); box(g.W - g.bw, 0, g.bw, g.bw, g.bh, g.sideLen);
+    // праговете: трапец (отпред нагоре, отгоре, отзад надолу); профилът t×t е навътре от външния контур
+    const y0 = g.bh, pts = [[g.D, y0], [g.D - g.a, y0 + g.H], [g.a, y0 + g.H], [0, y0]];   // (z, y) по външния контур
+    g.xs.forEach(x0 => { const x1 = x0 + g.t;
+      for(let i = 0; i < 3; i++){ const [za, ya] = pts[i], [zb, yb] = pts[i + 1], L = Math.hypot(zb - za, yb - ya), dz = (zb - za) / L, dy = (yb - ya) / L;
+        let nz = -dy, ny = dz; if(ny < 0 || (ny === 0 && nz < 0)) { nz = -nz; ny = -ny; }                 // външната нормала — нагоре
+        const iz = -nz * g.t, iy = -ny * g.t;                                                          // навътре
+        const A = [za, ya], B = [zb, yb], Bi = [zb + iz, yb + iy], Ai = [za + iz, ya + iy];
+        const q = (x, c) => [x, c[1], c[0]];
+        face([q(x0, A), q(x1, A), q(x1, B), q(x0, B)], [0, ny, nz], i === 1 ? TOP : FR);   // външната страна
+        face([q(x0, Ai), q(x1, Ai), q(x1, Bi), q(x0, Bi)], [0, -ny, -nz], RI);              // вътрешната
+        face([q(x1, A), q(x1, B), q(x1, Bi), q(x1, Ai)], [1, 0, 0], RI); face([q(x0, A), q(x0, B), q(x0, Bi), q(x0, Ai)], [-1, 0, 0], RI); } });
+    quads.sort((a, b) => a.d - b.d);
+    // размери
+    const off = Math.max(g.W, g.D) * 0.16;
+    const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
+    dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
+    dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
+    dim([g.W + off * 0.6, y0, g.D - g.a], [g.W + off * 0.6, y0 + g.H, g.D - g.a], String(g.H), 8, 0, "start");
+    const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
+                 [[g.W, y0 + g.H, g.D - g.a], [g.W + off * 0.6, y0 + g.H, g.D - g.a]], [[g.W, y0, g.D - g.a], [g.W + off * 0.6, y0, g.D - g.a]]].map(e => e.map(q => P(...q)));
+    let mi = [1e9, 1e9], ma = [-1e9, -1e9];
+    quads.forEach(q => q.pts.forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    dims.forEach(d => [d.a, d.b].forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    const VW = 900, VH = 620, pad = 60, sc = Math.min((VW - 2 * pad) / (ma[0] - mi[0]), (VH - 2 * pad) / (ma[1] - mi[1]));
+    const ox = (VW - (ma[0] - mi[0]) * sc) / 2, oy = (VH - (ma[1] - mi[1]) * sc) / 2, X = v => (ox + (v - mi[0]) * sc).toFixed(1), Y = v => (oy + (v - mi[1]) * sc).toFixed(1);
+    const grad = (id, a, b) => '<linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + a + '"/><stop offset="1" stop-color="' + b + '"/></linearGradient>';
+    let s = '<svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"><defs>' +
+      '<marker id="rAr" markerWidth="9" markerHeight="9" refX="4.5" refY="4.5" orient="auto"><path d="M1 1L8 4.5L1 8" fill="none" stroke="#1E6FF4" stroke-width="1.4"/></marker>' +
+      grad("rT", "#f3f8fc", "#dae6f0") + grad("rF", "#d2dde9", "#b1c3d6") + grad("rR", "#b7c7d9", "#94a9be") + '</defs>';
+    s += '<polygon points="' + [P(-20, 0, -20), P(g.W + 20, 0, -20), P(g.W + 20, 0, g.D + 20), P(-20, 0, g.D + 20)].map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="#334155" opacity="0.07"/>';
+    quads.forEach(q => s += '<polygon points="' + q.pts.map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="' + q.fill + '" stroke="#5f7d9e" stroke-width="0.8" stroke-linejoin="round"/>');
+    ext.forEach(([a, b]) => s += '<line x1="' + X(a.x) + '" y1="' + Y(a.y) + '" x2="' + X(b.x) + '" y2="' + Y(b.y) + '" stroke="#9fb3c8" stroke-width="0.8"/>');
+    dims.forEach(d => { s += '<line x1="' + X(d.a.x) + '" y1="' + Y(d.a.y) + '" x2="' + X(d.b.x) + '" y2="' + Y(d.b.y) + '" stroke="#1E6FF4" stroke-width="1.2" marker-start="url(#rAr)" marker-end="url(#rAr)"/>' +
+      '<text x="' + (+X((d.a.x + d.b.x) / 2) + d.dx) + '" y="' + (+Y((d.a.y + d.b.y) / 2) + d.dy) + '" text-anchor="' + d.anchor + '" font-size="18" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:4px">' + esc(d.txt) + '</text>'; });
+    return s + '</svg>';
+  }
+  // 2D изгледи (мм): отпред — праговете и разстоянията; отстрани — трапецът
+  function rackViews(p){
+    const g = rackGeo(p);
+    const view = (W, Hh, draw, title) => {
+      const padL = 70, padR = 110, padT = 40, padB = 90, VW = 760, k = Math.min((VW - padL - padR) / W, 300 / Hh), VH = Math.round(Hh * k + padT + padB);
+      const X = x => +(padL + x * k).toFixed(1), Y = y => +(padT + (Hh - y) * k).toFixed(1), out = [];
+      const rect = (x, y, w, h, fill) => out.push('<rect x="' + X(x) + '" y="' + Y(y + h) + '" width="' + Math.max(0.6, w * k).toFixed(1) + '" height="' + Math.max(0.6, h * k).toFixed(1) + '" fill="' + fill + '" stroke="#334155" stroke-width="1"/>');
+      const poly = (pts, fill) => out.push('<polygon points="' + pts.map(([x, y]) => X(x) + ',' + Y(y)).join(' ') + '" fill="' + fill + '" stroke="#334155" stroke-width="1"/>');
+      const hd = (a, b, py, txt, sz) => { if(Math.abs(b - a) < 0.5) return; out.push('<line x1="' + X(a) + '" y1="' + py + '" x2="' + X(b) + '" y2="' + py + '" stroke="#1552c7" stroke-width="1.1" marker-start="url(#rAr2)" marker-end="url(#rAr2)"/>' +
+        '<line x1="' + X(a) + '" y1="' + (py - 7) + '" x2="' + X(a) + '" y2="' + (py + 7) + '" stroke="#1552c7"/><line x1="' + X(b) + '" y1="' + (py - 7) + '" x2="' + X(b) + '" y2="' + (py + 7) + '" stroke="#1552c7"/>' +
+        '<text x="' + ((X(a) + X(b)) / 2) + '" y="' + (py - 5) + '" text-anchor="middle" font-size="' + (sz || 14) + '" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>'); };
+      const vd = (a, b, px, txt, side) => out.push('<line x1="' + px + '" y1="' + Y(a) + '" x2="' + px + '" y2="' + Y(b) + '" stroke="#1552c7" stroke-width="1.1" marker-start="url(#rAr2)" marker-end="url(#rAr2)"/>' +
+        '<text x="' + (px + (side < 0 ? -6 : 6)) + '" y="' + ((Y(a) + Y(b)) / 2 + 5) + '" text-anchor="' + (side < 0 ? "end" : "start") + '" font-size="14" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:3px">' + esc(txt) + '</text>');
+      const note = (x, y, txt) => out.push('<text x="' + X(x) + '" y="' + Y(y) + '" font-size="12" font-weight="600" fill="#7c3aed">' + esc(txt) + '</text>');
+      draw({ rect, poly, hd, vd, note, X, Y, floor:Y(0), padL, VW, padR });
+      return '<figure class="scheme"><svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif">' +
+        '<defs><marker id="rAr2" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,2 L5,5 L0,8" fill="none" stroke="#1552c7" stroke-width="1.5"/></marker></defs>' +
+        out.join("") + '</svg><figcaption>' + esc(title) + '</figcaption></figure>';
+    };
+    const Ht = g.bh + g.H;
+    const front = view(g.W, Ht, d => {
+      d.rect(0, 0, g.W, g.bh, "#dbe4ee");
+      g.xs.forEach(x => d.rect(x, g.bh, g.t, g.H, "#c7d2fe"));
+      d.hd(0, g.W, d.floor + 64, g.W + " — ширина");
+      for(let i = 0; i + 1 < g.xs.length; i++) d.hd(g.xs[i], g.xs[i + 1], d.floor + 30, fmt(g.pitch), 12);
+      if(g.xs.length > 1) d.hd(g.xs[0] + g.t, g.xs[1], d.Y(g.bh + g.H) - 14, "светло " + fmt(g.gap), 12);
+      d.vd(0, g.bh, d.padL - 14, String(g.bh), -1); d.vd(g.bh, Ht, d.padL - 14, String(g.H), -1); d.vd(0, Ht, d.VW - d.padR + 18, fmt(Ht) + " общо", 1);
+    }, "Изглед отпред — " + g.n + " прага през " + fmt(g.pitch) + " мм (по осите), крайните — на ръба на рамката");
+    const side = view(g.D, Ht, d => {
+      d.rect(0, 0, g.D, g.bh, "#dbe4ee");
+      const o = [[0, g.bh], [g.a, g.bh + g.H], [g.D - g.a, g.bh + g.H], [g.D, g.bh]];
+      const cx = g.D / 2, cy = g.bh + g.H / 2;   // профилът t×t е навътре от външния контур
+      for(let i = 0; i < 3; i++){ const [x1, y1] = o[i], [x2, y2] = o[i + 1], l = Math.hypot(x2 - x1, y2 - y1);
+        let nx = -(y2 - y1) / l, ny = (x2 - x1) / l; if(nx * (cx - (x1 + x2) / 2) + ny * (cy - (y1 + y2) / 2) < 0){ nx = -nx; ny = -ny; }
+        d.poly([o[i], o[i + 1], [x2 + nx * g.t, y2 + ny * g.t], [x1 + nx * g.t, y1 + ny * g.t]], "#c7d2fe"); }
+      d.hd(0, g.D, d.floor + 64, g.D + " — дълбочина");
+      d.hd(0, g.a, d.floor + 30, fmt(g.a), 12); d.hd(g.a, g.D - g.a, d.floor + 30, fmt(g.top), 12); d.hd(g.D - g.a, g.D, d.floor + 30, fmt(g.a), 12);
+      d.vd(g.bh, Ht, d.padL - 14, String(g.H), -1); d.vd(0, g.bh, d.padL - 14, String(g.bh), -1);
+      d.note(g.a + 6, g.bh + g.H * 0.45, "наклон " + fmt(g.ang) + "°");
+    }, "Изглед отстрани — прагът е трапец: долу " + g.D + ", горе " + fmt(g.top) + ", височина " + g.H + " мм (по външния контур)");
+    return { front, side };
+  }
+  function rackRows(p){
+    const g = rackGeo(p), pr = (a, b) => "Профил " + a + "×" + b;
+    return [
+      { part:"Рамка — отпред и отзад", mat:pr(g.bw, g.bh), size:fmt(g.W), qty:2, note:"Лежи на широката страна (" + g.bw + " мм), висок " + g.bh + " мм. Отпред и отзад са по цялата ширина." },
+      { part:"Рамка — отстрани", mat:pr(g.bw, g.bh), size:fmt(g.sideLen), qty:2, note:"Между предния и задния профил (" + g.D + " − 2 × " + g.bw + ")." },
+      { part:"Праг — трапец", mat:pr(g.t, g.t), size:fmt(g.dev), qty:g.n,
+        note:"Развита дължина по външния контур: " + fmt(g.slant) + " + " + fmt(g.top) + " + " + fmt(g.slant) + " мм. Огъва се на 2 места на " + fmt(180 - g.ang) + "° (наклон " + fmt(g.ang) + "° спрямо основата). " +
+             "Краката се срязват под " + fmt(g.ang) + "° и се заваряват върху предния и задния профил — на ръба на рамката. Разстояние между праговете " + fmt(g.pitch) + " мм по осите (светло " + fmt(g.gap) + " мм)." }
+    ];
+  }
+  function renderReady(){
+    const def = READY[RDY_KEY]; if(!Object.keys(RDY).length) RDY = rdyDefaults(RDY_KEY);
+    $("rdyPick").innerHTML = Object.keys(READY).map(k => '<option value="' + k + '"' + (k === RDY_KEY ? " selected" : "") + '>' + esc(READY[k].name) + '</option>').join("");
+    $("rdyFields").innerHTML = def.fields.map(([k, l, u]) => '<label>' + esc(l) + ' <span class="u">(' + esc(u) + ')</span><input type="number" min="1" step="1" data-rdy="' + k + '" value="' + esc(RDY[k]) + '"></label>').join("");
+    $("rdyFields").querySelectorAll("[data-rdy]").forEach(inp => inp.addEventListener("input", () => { RDY[inp.dataset.rdy] = +inp.value || 0; drawReady(); }));
+    drawReady();
+  }
+  function drawReady(){
+    const g = rackGeo(RDY), v = rackViews(RDY), rows = rackRows(RDY);
+    const m20 = (2 * g.W + 2 * g.sideLen) / 1000, m10 = g.n * g.dev / 1000;
+    $("rdyHost").innerHTML = '<div class="card rdycard"><h2>' + esc(READY[RDY_KEY].name) + '</h2>' +
+      '<div class="printsum">Основа <b>' + g.W + ' × ' + g.D + ' мм</b> от профил ' + g.bw + '×' + g.bh + ' · <b>' + g.n + ' прага</b> от профил ' + g.t + '×' + g.t + ', трапец с височина <b>' + g.H + ' мм</b> · ' +
+        'между праговете <b>' + fmt(g.pitch) + ' мм</b> по осите (светло ' + fmt(g.gap) + ' мм) · обща височина ' + fmt(g.bh + g.H) + ' мм</div>' +
+      '<div class="rdy3d">' + rackSvg(RDY) + '</div><div class="rdyviews">' + v.front + v.side + '</div>' +
+      '<h3>Разкрой</h3><div class="tw"><table class="cut"><thead><tr><th>Детайл</th><th>Материал</th><th>Размер (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+      rows.map(r => '<tr><td><b>' + esc(r.part) + '</b></td><td>' + esc(r.mat) + '</td><td>' + esc(r.size) + '</td><td>' + r.qty + '</td><td>' + esc(r.note) + '</td></tr>').join("") +
+      '</tbody></table></div>' +
+      '<div class="printsum" style="margin-top:8px">Общо профил ' + g.bw + '×' + g.bh + ': <b>' + fmt(m20) + ' м</b> · профил ' + g.t + '×' + g.t + ': <b>' + fmt(m10) + ' м</b> · заварки: 4 ъгъла на рамката + ' + (2 * g.n) + ' крака на праговете</div></div>';
+  }
+  $("rdyPick").addEventListener("change", e => { RDY_KEY = e.target.value; RDY = rdyDefaults(RDY_KEY); renderReady(); });
+  $("rdyReset").addEventListener("click", () => { RDY = rdyDefaults(RDY_KEY); renderReady(); });
+  $("rdyPrint").addEventListener("click", () => window.print());
+
+  const PAGES = { work:"Разкрой", processing:"В обработка", pallets:"Палети", designer:"Конструктор", ready:"Готови чертежи", archive:"Архив", stock:"Фира — склад", settings:"Настройки" };
   function closeMenu(){ $("menu").hidden = true; $("menubg").hidden = true; }
   function showPage(name){
     if(!PAGES[name]) name = "work";
@@ -3665,6 +3808,7 @@
     if(name === "designer") renderDesigner();
     if(name === "stock") renderStock();
     if(name === "pallets") renderPallets();
+    if(name === "ready") renderReady();
     window.scrollTo({ top:0 });
   }
   $("burger").addEventListener("click", () => { const open = !$("menu").hidden; if(open) closeMenu(); else { $("menu").hidden = false; $("menubg").hidden = false; } });

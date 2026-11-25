@@ -169,7 +169,11 @@
     .drawgrid svg{max-height:98mm} .dfront svg{max-height:108mm}
     .tdraw .scheme figcaption{font-size:12px}
     .tdraw .printsum{font-size:13px}
+    .rdy3d svg{max-height:115mm;width:auto!important;max-width:100%;margin:0 auto} .rdyviews,.rdycard .tw{break-inside:avoid} .rdyviews svg{max-height:70mm}
   }
+  .rdyviews{display:grid;grid-template-columns:1fr 1fr;gap:12px} .rdyviews figure{margin:0}
+  .rdy3d svg,.rdyviews svg{width:100%;height:auto;display:block;background:#fff}
+  @media screen and (max-width:800px){ .rdyviews{grid-template-columns:1fr} }
   .views2{display:grid;grid-template-columns:1fr;gap:12px;max-width:1000px} .views2 .scheme{margin:0}
   .legs6ctl{display:flex;gap:10px;flex-wrap:wrap;width:100%;margin-top:8px} .legs6ctl label{flex:1 1 170px} .hemctl[hidden],.legs6ctl[hidden]{display:none}
   .sinkctl,.sinkmore{display:flex;gap:10px;flex-wrap:wrap;width:100%;margin-top:8px} .sinkctl label{flex:1 1 170px} .sinkmore[hidden]{display:none}
@@ -257,6 +261,7 @@
   <button class="menuItem" data-go="processing" type="button">В обработка <span class="badge" id="cntProc"></span></button>
   <button class="menuItem" data-go="pallets" type="button">Палети</button>
   <button class="menuItem" data-go="designer" type="button">Конструктор</button>
+  <button class="menuItem" data-go="ready" type="button">Готови чертежи</button>
   <button class="menuItem" data-go="archive" type="button">Архив</button>
   <button class="menuItem" data-go="stock" type="button">Фира — склад</button>
   <button class="menuItem" data-go="settings" type="button">Настройки</button>
@@ -331,6 +336,17 @@
     </div>
     <div class="status" id="stockStatus"></div>
   </div>
+  </section>
+
+  <section class="page" data-page="ready" hidden>
+    <div class="card noprint">
+      <h2>Готови чертежи</h2>
+      <div class="muted">Изделия, които се правят често — чертеж с размерите и разкрой, готови за печат. Размерите са стандартните; ако ги смените, чертежът и разкроят се сменят веднага (при презареждане се връщат стандартните).</div>
+      <label style="margin-top:10px">Изделие<select id="rdyPick"></select></label>
+      <div class="grid" id="rdyFields" style="margin-top:8px"></div>
+      <div class="row"><button class="btn primary" id="rdyPrint" type="button">Печат</button><button class="btn" id="rdyReset" type="button">Стандартни размери</button></div>
+    </div>
+    <div id="rdyHost"></div>
   </section>
 
   <section class="page" data-page="designer" hidden>
