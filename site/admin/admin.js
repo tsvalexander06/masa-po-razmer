@@ -3652,35 +3652,55 @@
   /* ---------- burger menu / pages ---------- */
   /* ---------- ГОТОВИ ЧЕРТЕЖИ: изделия, които се правят често (чертеж + разкрой за печат) ----------
      Стойка за тави за миялна машина: основа — рамка от профил 20×10 (лежи на широката страна),
-     отгоре — прагове от профил 10×10, огънати като трапец, през ~10 см; тавите стоят на ръб между праговете. */
+     отгоре — прагове от профил 10×10 (квадрат „П“, трапец или триъгълник), през ~10 см; тавите стоят на ръб между праговете;
+     по средата на основата — напречен профил за здравина. */
   const READY = {
     rack: { name:"Стойка за тави за миялна машина",
-      fields:[["W","Ширина на основата","мм",500], ["D","Дълбочина на основата","мм",500], ["H","Височина на праговете (над рамката)","мм",200],
-              ["top","Горна част на трапеца","мм",300], ["n","Брой прагове","бр.",6], ["bw","Профил на основата — ширина","мм",20], ["bh","Профил на основата — височина","мм",10],
+      fields:[["shape","Форма на праговете","","rect", [["rect","квадрат „П“ — 2 стойки + горна част, само прави срезове"],["trap","трапец — 2 наклонени + горна част, на фаска"],["tri","триъгълник — 2 наклонени части"]]],
+              ["W","Ширина на основата","мм",500], ["D","Дълбочина на основата","мм",500], ["H","Височина на праговете (над рамката)","мм",200],
+              ["top","Горна част на трапеца (само при трапец)","мм",300], ["n","Брой прагове","бр.",6], ["bw","Профил на основата — ширина","мм",20], ["bh","Профил на основата — височина","мм",10],
               ["t","Профил на праговете","мм (квадратен)",10]] }
   };
   let RDY_KEY = "rack", RDY = {};
   const rdyDefaults = k => Object.fromEntries(READY[k].fields.map(f => [f[0], f[3]]));
   function rackGeo(p){
     const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), H = Math.max(20, +p.H || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
-    const n = Math.max(2, Math.round(+p.n || 2)), top = Math.min(D - 2 * t, Math.max(0, +p.top || 0)), a = (D - top) / 2;   // a — хоризонталното отместване на наклона
-    const slant = Math.hypot(a, H), ang = Math.atan2(H, a) * 180 / Math.PI;            // ъгъл на наклона спрямо основата
+    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "rect";
+    const top = shape === "trap" ? Math.min(D - 2 * t, Math.max(0, +p.top || 0)) : 0, a = shape === "trap" ? (D - top) / 2 : shape === "tri" ? D / 2 : 0;   // a — хоризонталното отместване на наклона
+    const ang = a > 0 ? Math.atan2(H, a) * 180 / Math.PI : 90;                            // наклон спрямо основата
     const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
-    // прагът е от 3 отрязани парчета (2 наклонени + горно), заварени на фаска; краката — срез успоредно на рамката
-    const ctr = rackContour([[0, 0], [a, H], [D - a, H], [D, 0]], t), len = (u, v) => Math.hypot(v[0] - u[0], v[1] - u[1]);
-    const pcs = [0, 1].map(i => ({ out:len(ctr.o[i], ctr.o[i + 1]), inn:len(ctr.i[i], ctr.i[i + 1]) }));   // наклонената и горната част
-    return { W, D, H, t, bw, bh, n, top, a, slant, ang, pitch, gap:pitch - t, xs, dev:2 * slant + top, sideLen:Math.max(0, D - 2 * bw),
-             ctr, legOut:pcs[0].out, legIn:pcs[0].inn, topOut:pcs[1].out, topIn:pcs[1].inn, footCut:90 - ang, miter:ang / 2 };
+    const len = (u, v) => Math.hypot(v[0] - u[0], v[1] - u[1]), mm = v => Math.round(v);   // дължините — на цял мм
+    // парчетата на един праг: многоъгълници в (дълбочина, височина над рамката)
+    let pieces, joints, hz;
+    if(shape === "rect"){ const hp = H - t;
+      pieces = [{ name:"Праг — стойка", per:2, polys:[[[0, 0], [t, 0], [t, hp], [0, hp]], [[D - t, 0], [D, 0], [D, hp], [D - t, hp]]], out:mm(hp), inn:mm(hp),
+                  note:"По 2 на праг. Двата края — прав срез 90°. Стои отвесно на ръба на рамката (отпред и отзад); горната част ляга върху стойките." },
+                { name:"Праг — горна част", per:1, polys:[[[0, hp], [D, hp], [D, H], [0, H]]], out:mm(D), inn:mm(D),
+                  note:"По 1 на праг. Двата края — прав срез 90°. Ляга върху двете стойки (челно)." }];
+      joints = 2; hz = D - t / 2;
+    } else {
+      const o = shape === "tri" ? [[0, 0], [a, H], [D, 0]] : [[0, 0], [a, H], [D - a, H], [D, 0]], c = rackContour(o, t);
+      const seg = k => [o[k], o[k + 1], c.i[k + 1], c.i[k]], foot = 90 - ang, mit = shape === "tri" ? ang : ang / 2;   // срезовете — от правия (90°)
+      const leg = { name:"Праг — наклонена част (крак)", per:2, polys:[seg(0), seg(o.length - 2)], out:mm(len(o[0], o[1])), inn:mm(len(c.i[0], c.i[1])),
+        note:"По 2 на праг. Размер: външна / вътрешна страна. Долу — срез " + fmt(foot) + "° от правия (стъпва равно на рамката, наклон " + fmt(ang) + "°); горе — " +
+             (shape === "tri" ? "срез " + fmt(mit) + "° от правия (двата крака се срещат отгоре, отвесно)" : "фаска " + fmt(mit) + "° от правия към горната част") + ". Парчето е трапец — външната страна е по-дългата и в двата края." };
+      pieces = [leg];
+      if(shape === "trap") pieces.push({ name:"Праг — горна част", per:1, polys:[seg(1)], out:mm(len(o[1], o[2])), inn:mm(len(c.i[1], c.i[2])),
+        note:"По 1 на праг. Размер: горна (външна) / долна (вътрешна) страна. Двата края — фаска " + fmt(mit) + "° от правия." });
+      joints = shape === "tri" ? 1 : 2; hz = shape === "tri" ? D / 2 : D - a;
+    }
+    return { W, D, H, t, bw, bh, n, shape, top, a, ang, pitch, gap:pitch - t, xs, sideLen:Math.max(0, D - 2 * bw), midLen:Math.max(0, W - 2 * bw), pieces, joints, hz,
+             perPrag:pieces.reduce((s, q) => s + q.per * q.out, 0), nPieces:pieces.reduce((s, q) => s + q.per, 0) };
   }
-  // външният контур на прага (от пода на рамката) → вътрешният (профилът t е навътре); фаските са по ъглополовящите
+  // външният контур на прага (от горния ръб на рамката) → вътрешният (профилът t е навътре); съединенията са по ъглополовящите
   function rackContour(o, t){
     const cx = o.reduce((s, q) => s + q[0], 0) / o.length, cy = o.reduce((s, q) => s + q[1], 0) / o.length;
-    const lines = [0, 1, 2].map(k => { const [x1, y1] = o[k], [x2, y2] = o[k + 1], l = Math.hypot(x2 - x1, y2 - y1); let nx = -(y2 - y1) / l, ny = (x2 - x1) / l;
+    const lines = o.slice(0, -1).map((_, k) => { const [x1, y1] = o[k], [x2, y2] = o[k + 1], l = Math.hypot(x2 - x1, y2 - y1); let nx = -(y2 - y1) / l, ny = (x2 - x1) / l;
       if(nx * (cx - (x1 + x2) / 2) + ny * (cy - (y1 + y2) / 2) < 0){ nx = -nx; ny = -ny; } return { p:[x1 + nx * t, y1 + ny * t], d:[(x2 - x1) / l, (y2 - y1) / l] }; });
     const cross = (A, B) => { const det = A.d[0] * B.d[1] - A.d[1] * B.d[0]; if(Math.abs(det) < 1e-9) return A.p;
       const u = ((B.p[0] - A.p[0]) * B.d[1] - (B.p[1] - A.p[1]) * B.d[0]) / det; return [A.p[0] + A.d[0] * u, A.p[1] + A.d[1] * u]; };
     const base = { p:[0, o[0][1]], d:[1, 0] };
-    return { o, i:[cross(lines[0], base), cross(lines[0], lines[1]), cross(lines[1], lines[2]), cross(lines[2], base)] };
+    return { o, i:[cross(lines[0], base)].concat(lines.slice(1).map((L, k) => cross(lines[k], L)), [cross(lines[lines.length - 1], base)]) };
   }
   // 3D (изометрия) — същият стил като чертежите на масите
   function rackSvg(p){
@@ -3696,25 +3716,24 @@
     // рамката: отпред и отзад по цялата ширина, отстрани — между тях
     box(0, 0, g.D - g.bw, g.W, g.bh, g.bw); box(0, 0, 0, g.W, g.bh, g.bw);
     box(0, 0, g.bw, g.bw, g.bh, g.sideLen); box(g.W - g.bw, 0, g.bw, g.bw, g.bh, g.sideLen);
+    box(g.bw, 0, g.D / 2 - g.bw / 2, g.midLen, g.bh, g.bw);   // среден профил — напречно, за здравина
     // праговете: трапец (отпред нагоре, отгоре, отзад надолу); профилът t×t е навътре от външния контур
-    const y0 = g.bh, zy = q => [q[0], y0 + q[1]];   // контурът (дълбочина, височина) → (z, y); 3 отделни парчета на фаска
-    g.xs.forEach(x0 => { const x1 = x0 + g.t;
-      for(let i = 0; i < 3; i++){ const A = zy(g.ctr.o[i]), B = zy(g.ctr.o[i + 1]), Ai = zy(g.ctr.i[i]), Bi = zy(g.ctr.i[i + 1]);
-        const L = Math.hypot(B[0] - A[0], B[1] - A[1]), dz = (B[0] - A[0]) / L, dy = (B[1] - A[1]) / L;
-        let nz = -dy, ny = dz; if(ny < 0 || (ny === 0 && nz < 0)) { nz = -nz; ny = -ny; }                 // външната нормала — нагоре
-        const q = (x, c) => [x, c[1], c[0]];
-        face([q(x0, A), q(x1, A), q(x1, B), q(x0, B)], [0, ny, nz], i === 1 ? TOP : FR);   // външната страна
-        face([q(x0, Ai), q(x1, Ai), q(x1, Bi), q(x0, Bi)], [0, -ny, -nz], RI);              // вътрешната
-        face([q(x1, A), q(x1, B), q(x1, Bi), q(x1, Ai)], [1, 0, 0], RI); face([q(x0, A), q(x0, B), q(x0, Bi), q(x0, Ai)], [-1, 0, 0], RI); } });
+    const y0 = g.bh;   // всяко парче — призма: многоъгълникът (дълбочина, височина) × дебелината t
+    const prism = (x0, x1, poly) => { const cz = poly.reduce((a, q) => a + q[0], 0) / poly.length, cy = poly.reduce((a, q) => a + q[1], 0) / poly.length, P3 = (x, q) => [x, y0 + q[1], q[0]];
+      face(poly.map(q => P3(x1, q)), [1, 0, 0], RI); face(poly.map(q => P3(x0, q)), [-1, 0, 0], RI);
+      poly.forEach((q, k) => { const r = poly[(k + 1) % poly.length], L = Math.hypot(r[0] - q[0], r[1] - q[1]) || 1; let nz = (r[1] - q[1]) / L, ny = -(r[0] - q[0]) / L;
+        if(nz * ((q[0] + r[0]) / 2 - cz) + ny * ((q[1] + r[1]) / 2 - cy) < 0){ nz = -nz; ny = -ny; }
+        face([P3(x0, q), P3(x1, q), P3(x1, r), P3(x0, r)], [0, ny, nz], ny > 0.7 ? TOP : nz > 0 ? FR : RI); }); };
+    g.xs.forEach(x0 => g.pieces.forEach(pc => pc.polys.forEach(poly => prism(x0, x0 + g.t, poly))));
     quads.sort((a, b) => a.d - b.d);
     // размери
     const off = Math.max(g.W, g.D) * 0.16;
     const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
     dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
     dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
-    dim([g.W + off * 0.6, y0, g.D - g.a], [g.W + off * 0.6, y0 + g.H, g.D - g.a], String(g.H), 8, 0, "start");
+    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], String(g.H), 8, 0, "start");
     const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
-                 [[g.W, y0 + g.H, g.D - g.a], [g.W + off * 0.6, y0 + g.H, g.D - g.a]], [[g.W, y0, g.D - g.a], [g.W + off * 0.6, y0, g.D - g.a]]].map(e => e.map(q => P(...q)));
+                 [[g.W, y0 + g.H, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz]], [[g.W, y0, g.hz], [g.W + off * 0.6, y0, g.hz]]].map(e => e.map(q => P(...q)));
     let mi = [1e9, 1e9], ma = [-1e9, -1e9];
     quads.forEach(q => q.pts.forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
     dims.forEach(d => [d.a, d.b].forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
@@ -3761,47 +3780,50 @@
     }, "Изглед отпред — " + g.n + " прага през " + fmt(g.pitch) + " мм (по осите), крайните — на ръба на рамката");
     const side = view(g.D, Ht, d => {
       d.rect(0, 0, g.D, g.bh, "#dbe4ee");
-      const up = q => [q[0], g.bh + q[1]];   // трите парчета — отрязани и заварени на фаска
-      for(let i = 0; i < 3; i++) d.poly([up(g.ctr.o[i]), up(g.ctr.o[i + 1]), up(g.ctr.i[i + 1]), up(g.ctr.i[i])], i === 1 ? "#ddd6fe" : "#c7d2fe");
-      d.note(g.a + g.t + 4, g.bh + g.H - g.t - 16, "фаска " + fmt(g.miter) + "°"); d.note(g.t + 6, g.bh + 8, "срез " + fmt(g.footCut) + "°");
+      d.rect(g.D / 2 - g.bw / 2, 0, g.bw, g.bh, "#b9c6d6");   // средният профил (в разрез)
+      const up = q => [q[0], g.bh + q[1]];
+      g.pieces.forEach(pc => pc.polys.forEach(poly => d.poly(poly.map(up), pc.per === 1 ? "#ddd6fe" : "#c7d2fe")));
       d.hd(0, g.D, d.floor + 64, g.D + " — дълбочина");
-      d.hd(0, g.a, d.floor + 30, fmt(g.a), 12); d.hd(g.a, g.D - g.a, d.floor + 30, fmt(g.top), 12); d.hd(g.D - g.a, g.D, d.floor + 30, fmt(g.a), 12);
+      if(g.shape === "trap"){ d.hd(0, g.a, d.floor + 30, fmt(g.a), 12); d.hd(g.a, g.D - g.a, d.floor + 30, fmt(g.top), 12); d.hd(g.D - g.a, g.D, d.floor + 30, fmt(g.a), 12); }
+      if(g.shape === "tri"){ d.hd(0, g.D / 2, d.floor + 30, fmt(g.D / 2), 12); d.hd(g.D / 2, g.D, d.floor + 30, fmt(g.D / 2), 12); }
+      if(g.shape === "rect"){ d.vd(g.bh, g.bh + g.H - g.t, d.X(g.D) + 18, fmt(g.H - g.t) + " стойка", 1); d.note(g.D / 2 - 70, g.bh + g.H - g.t - 22, "всички срезове — прави (90°)"); }
+      else{ d.note(g.a / 2 + 10, g.bh + g.H * 0.5, "наклон " + fmt(g.ang) + "°"); d.note(g.t + 6, g.bh + 8, "срез " + fmt(90 - g.ang) + "°"); }
       d.vd(g.bh, Ht, d.padL - 14, String(g.H), -1); d.vd(0, g.bh, d.padL - 14, String(g.bh), -1);
-      d.note(g.a + 6, g.bh + g.H * 0.45, "наклон " + fmt(g.ang) + "°");
-    }, "Изглед отстрани — прагът е трапец от 3 отрязани парчета: долу " + g.D + ", горе " + fmt(g.top) + ", височина " + g.H + " мм (по външния контур)");
+      d.note(g.D / 2 + g.bw, g.bh + 4, "среден профил");
+    }, "Изглед отстрани — прагът: " + RACK_SHAPE[g.shape] + " от " + g.nPieces + " отрязани парчета, височина " + g.H + " мм (по външния контур)");
     return { front, side };
   }
+  const RACK_SHAPE = { rect:"квадрат „П“", trap:"трапец", tri:"триъгълник" };
   function rackRows(p){
     const g = rackGeo(p), pr = (a, b) => "Профил " + a + "×" + b;
     return [
       { part:"Рамка — отпред и отзад", mat:pr(g.bw, g.bh), size:fmt(g.W), qty:2, note:"Лежи на широката страна (" + g.bw + " мм), висок " + g.bh + " мм. Отпред и отзад са по цялата ширина." },
       { part:"Рамка — отстрани", mat:pr(g.bw, g.bh), size:fmt(g.sideLen), qty:2, note:"Между предния и задния профил (" + g.D + " − 2 × " + g.bw + ")." },
-      { part:"Праг — наклонена част (крак)", mat:pr(g.t, g.t), size:fmt(g.legOut) + " / " + fmt(g.legIn), qty:2 * g.n,
-        note:"По 2 на праг. Размер: външна / вътрешна страна. Долу — срез " + fmt(g.footCut) + "° от правия (стъпва равно върху рамката, наклон " + fmt(g.ang) + "°); " +
-             "горе — фаска " + fmt(g.miter) + "° от правия към горната част. Парчето е трапец — външната страна е по-дългата и в двата края." },
-      { part:"Праг — горна част", mat:pr(g.t, g.t), size:fmt(g.topOut) + " / " + fmt(g.topIn), qty:g.n,
-        note:"По 1 на праг. Размер: горна (външна) / долна (вътрешна) страна. Двата края — фаска " + fmt(g.miter) + "° от правия (трапец)." }
+      { part:"Рамка — среден профил (напречно)", mat:pr(g.bw, g.bh), size:fmt(g.midLen), qty:1, note:"По средата на дълбочината (оста му — на " + fmt(g.D / 2) + " мм от ръба), между двата странични профила — за здравина; тавите стъпват и на него." },
+      ...g.pieces.map(pc => ({ part:pc.name, mat:pr(g.t, g.t), size:pc.out === pc.inn ? String(pc.out) : pc.out + " / " + pc.inn, qty:pc.per * g.n, note:pc.note }))
     ];
   }
   function renderReady(){
     const def = READY[RDY_KEY]; if(!Object.keys(RDY).length) RDY = rdyDefaults(RDY_KEY);
     $("rdyPick").innerHTML = Object.keys(READY).map(k => '<option value="' + k + '"' + (k === RDY_KEY ? " selected" : "") + '>' + esc(READY[k].name) + '</option>').join("");
-    $("rdyFields").innerHTML = def.fields.map(([k, l, u]) => '<label>' + esc(l) + ' <span class="u">(' + esc(u) + ')</span><input type="number" min="1" step="1" data-rdy="' + k + '" value="' + esc(RDY[k]) + '"></label>').join("");
-    $("rdyFields").querySelectorAll("[data-rdy]").forEach(inp => inp.addEventListener("input", () => { RDY[inp.dataset.rdy] = +inp.value || 0; drawReady(); }));
+    $("rdyFields").innerHTML = def.fields.map(([k, l, u, , opts]) => opts
+      ? '<label>' + esc(l) + '<select data-rdy="' + k + '">' + opts.map(([v, t]) => '<option value="' + v + '"' + (RDY[k] === v ? " selected" : "") + '>' + esc(t) + '</option>').join("") + '</select></label>'
+      : '<label>' + esc(l) + ' <span class="u">(' + esc(u) + ')</span><input type="number" min="1" step="1" data-rdy="' + k + '" value="' + esc(RDY[k]) + '"></label>').join("");
+    $("rdyFields").querySelectorAll("[data-rdy]").forEach(inp => inp.addEventListener("input", () => { RDY[inp.dataset.rdy] = inp.tagName === "SELECT" ? inp.value : +inp.value || 0; drawReady(); }));
     drawReady();
   }
   function drawReady(){
     const g = rackGeo(RDY), v = rackViews(RDY), rows = rackRows(RDY);
-    const m20 = (2 * g.W + 2 * g.sideLen) / 1000, m10 = g.n * (2 * g.legOut + g.topOut) / 1000;
+    const m20 = (2 * g.W + 2 * g.sideLen + g.midLen) / 1000, m10 = g.n * g.perPrag / 1000;
     $("rdyHost").innerHTML = '<div class="card rdycard"><h2>' + esc(READY[RDY_KEY].name) + '</h2>' +
-      '<div class="printsum">Основа <b>' + g.W + ' × ' + g.D + ' мм</b> от профил ' + g.bw + '×' + g.bh + ' · <b>' + g.n + ' прага</b> от профил ' + g.t + '×' + g.t + ', трапец с височина <b>' + g.H + ' мм</b> · ' +
+      '<div class="printsum">Основа <b>' + g.W + ' × ' + g.D + ' мм</b> от профил ' + g.bw + '×' + g.bh + ' (със среден профил) · <b>' + g.n + ' прага</b> от профил ' + g.t + '×' + g.t + ' — ' + RACK_SHAPE[g.shape] + ', височина <b>' + g.H + ' мм</b> · ' +
         'между праговете <b>' + fmt(g.pitch) + ' мм</b> по осите (светло ' + fmt(g.gap) + ' мм) · обща височина ' + fmt(g.bh + g.H) + ' мм</div>' +
       '<div class="rdy3d">' + rackSvg(RDY) + '</div><div class="rdyviews">' + v.front + v.side + '</div>' +
       '<h3>Разкрой</h3><div class="tw"><table class="cut"><thead><tr><th>Детайл</th><th>Материал</th><th>Размер (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
       rows.map(r => '<tr><td><b>' + esc(r.part) + '</b></td><td>' + esc(r.mat) + '</td><td>' + esc(r.size) + '</td><td>' + r.qty + '</td><td>' + esc(r.note) + '</td></tr>').join("") +
       '</tbody></table></div>' +
-      '<div class="printsum" style="margin-top:8px">Общо профил ' + g.bw + '×' + g.bh + ': <b>' + fmt(m20) + ' м</b> · профил ' + g.t + '×' + g.t + ': <b>' + fmt(m10) + ' м</b> (' + (3 * g.n) + ' парчета) · ' +
-        'заварки: 4 ъгъла на рамката, ' + (2 * g.n) + ' фаски на праговете и ' + (2 * g.n) + ' крака върху рамката · праговете се заваряват по шаблон, за да са еднакви и успоредни</div></div>';
+      '<div class="printsum" style="margin-top:8px">Общо профил ' + g.bw + '×' + g.bh + ': <b>' + fmt(m20) + ' м</b> · профил ' + g.t + '×' + g.t + ': <b>' + fmt(m10) + ' м</b> (' + (g.nPieces * g.n) + ' парчета) · ' +
+        'заварки: 4 ъгъла на рамката + 2 на средния профил, ' + (g.joints * g.n) + ' съединения на праговете и ' + (2 * g.n) + ' крака върху рамката · праговете се заваряват по шаблон, за да са еднакви и успоредни</div></div>';
   }
   $("rdyPick").addEventListener("change", e => { RDY_KEY = e.target.value; RDY = rdyDefaults(RDY_KEY); renderReady(); });
   $("rdyReset").addEventListener("click", () => { RDY = rdyDefaults(RDY_KEY); renderReady(); });
