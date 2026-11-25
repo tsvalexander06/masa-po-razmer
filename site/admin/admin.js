@@ -3656,16 +3656,18 @@
      по средата на основата — напречен профил за здравина. */
   const READY = {
     rack: { name:"Стойка за тави за миялна машина",
-      fields:[["shape","Форма на праговете","","rect", [["rect","квадрат „П“ — 2 стойки + горна част, само прави срезове"],["trap","трапец — 2 наклонени + горна част, на фаска"],["tri","триъгълник — 2 наклонени части"]]],
-              ["W","Ширина на основата","мм",500], ["D","Дълбочина на основата","мм",500], ["H","Височина на праговете (над рамката)","мм",200],
+      fields:[["shape","Форма на праговете","","tri", [["tri","триъгълник — 2 наклонени части (при 45° — всички срезове по 45°)"],["rect","квадрат „П“ — 2 стойки + горна част, само прави срезове"],["trap","трапец — 2 наклонени + горна част, на фаска"]]],
+              ["W","Ширина на основата","мм",500], ["D","Дълбочина на основата","мм",500], ["H","Височина на праговете — при квадрат и трапец","мм",200], ["ang","Наклон на триъгълника","° (височината се смята от него; 45° = двата среза по 45°)",45],
               ["top","Горна част на трапеца (само при трапец)","мм",300], ["n","Брой прагове","бр.",6], ["bw","Профил на основата — ширина","мм",20], ["bh","Профил на основата — височина","мм",10],
               ["t","Профил на праговете","мм (квадратен)",10]] }
   };
   let RDY_KEY = "rack", RDY = {};
   const rdyDefaults = k => Object.fromEntries(READY[k].fields.map(f => [f[0], f[3]]));
   function rackGeo(p){
-    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), H = Math.max(20, +p.H || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
-    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "rect";
+    let H = Math.max(20, +p.H || 0);
+    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
+    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "tri";
+    if(shape === "tri"){ const ta = Math.min(75, Math.max(15, +p.ang || 45)); H = Math.round(D / 2 * Math.tan(ta * Math.PI / 180) * 10) / 10; }   // триъгълник: височината — от наклона
     const top = shape === "trap" ? Math.min(D - 2 * t, Math.max(0, +p.top || 0)) : 0, a = shape === "trap" ? (D - top) / 2 : shape === "tri" ? D / 2 : 0;   // a — хоризонталното отместване на наклона
     const ang = a > 0 ? Math.atan2(H, a) * 180 / Math.PI : 90;                            // наклон спрямо основата
     const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
@@ -3681,8 +3683,10 @@
     } else {
       const o = shape === "tri" ? [[0, 0], [a, H], [D, 0]] : [[0, 0], [a, H], [D - a, H], [D, 0]], c = rackContour(o, t);
       const seg = k => [o[k], o[k + 1], c.i[k + 1], c.i[k]], foot = 90 - ang, mit = shape === "tri" ? ang : ang / 2;   // срезовете — от правия (90°)
+      const same = Math.abs(foot - mit) < 0.05;   // напр. 45° — и двата среза еднакви (едно нагласяне на циркуляра)
       const leg = { name:"Праг — наклонена част (крак)", per:2, polys:[seg(0), seg(o.length - 2)], out:mm(len(o[0], o[1])), inn:mm(len(c.i[0], c.i[1])),
-        note:"По 2 на праг. Размер: външна / вътрешна страна. Долу — срез " + fmt(foot) + "° от правия (стъпва равно на рамката, наклон " + fmt(ang) + "°); горе — " +
+        note:"По 2 на праг. " + (same && shape === "tri" ? "Двата края — срез " + fmt(foot) + "° (едно нагласяне на циркуляра за всички парчета). " : "") +
+             "Размер: външна / вътрешна страна. Долу — срез " + fmt(foot) + "° от правия (стъпва равно на рамката, наклон " + fmt(ang) + "°); горе — " +
              (shape === "tri" ? "срез " + fmt(mit) + "° от правия (двата крака се срещат отгоре, отвесно)" : "фаска " + fmt(mit) + "° от правия към горната част") + ". Парчето е трапец — външната страна е по-дългата и в двата края." };
       pieces = [leg];
       if(shape === "trap") pieces.push({ name:"Праг — горна част", per:1, polys:[seg(1)], out:mm(len(o[1], o[2])), inn:mm(len(c.i[1], c.i[2])),
@@ -3704,11 +3708,15 @@
   }
   // 3D (изометрия) — същият стил като чертежите на масите
   function rackSvg(p){
-    const g = rackGeo(p), P = (x, y, z) => ({ x:(x - z) * 0.866, y:(x + z) * 0.5 - y }), quads = [], dims = [];
-    const V = [1, 1, 1];
+    // гледа се почти отстрани на праговете (ширината — скъсена, надолу; дълбочината — почти хоризонтално): при изометрия
+    // наклон 45° на праговете ляга точно по оста на чертежа и краката им се сливат в една линия
+    const AX = [0.35, 0.6], AZ = [0.97, 0.25];
+    const g = rackGeo(p), P = (x, y, z) => ({ x:x * AX[0] - z * AZ[0], y:x * AX[1] + z * AZ[1] - y }), quads = [], dims = [];
+    const V = [1, AX[1] + AX[0] * AZ[1] / AZ[0], AX[0] / AZ[0]];
+    let layer = 0;   // посоката към зрителя (там проекцията се слива в точка)
     const face = (pts, nrm, fill) => { if(nrm[0] * V[0] + nrm[1] * V[1] + nrm[2] * V[2] <= 0) return;
       const c = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
-      quads.push({ d:c[0] + c[1] + c[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
+      quads.push({ layer, d:c[0] * V[0] + c[1] * V[1] + c[2] * V[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
     const TOP = "url(#rT)", FR = "url(#rF)", RI = "url(#rR)";
     const box = (x, y, z, w, h, d) => { const X = x + w, Y = y + h, Z = z + d;
       face([[x,Y,z],[X,Y,z],[X,Y,Z],[x,Y,Z]], [0,1,0], TOP); face([[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], FR); face([[X,y,z],[X,Y,z],[X,Y,Z],[X,y,Z]], [1,0,0], RI);
@@ -3724,14 +3732,15 @@
       poly.forEach((q, k) => { const r = poly[(k + 1) % poly.length], L = Math.hypot(r[0] - q[0], r[1] - q[1]) || 1; let nz = (r[1] - q[1]) / L, ny = -(r[0] - q[0]) / L;
         if(nz * ((q[0] + r[0]) / 2 - cz) + ny * ((q[1] + r[1]) / 2 - cy) < 0){ nz = -nz; ny = -ny; }
         face([P3(x0, q), P3(x1, q), P3(x1, r), P3(x0, r)], [0, ny, nz], ny > 0.7 ? TOP : nz > 0 ? FR : RI); }); };
+    layer = 1;   // праговете — над основата (основата е отдолу и не ги закрива, затова се рисува първа)
     g.xs.forEach(x0 => g.pieces.forEach(pc => pc.polys.forEach(poly => prism(x0, x0 + g.t, poly))));
-    quads.sort((a, b) => a.d - b.d);
+    quads.sort((a, b) => a.layer - b.layer || a.d - b.d);
     // размери
     const off = Math.max(g.W, g.D) * 0.16;
     const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
     dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
     dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
-    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], String(g.H), 8, 0, "start");
+    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], fmt(g.H), 8, 0, "start");
     const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
                  [[g.W, y0 + g.H, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz]], [[g.W, y0, g.hz], [g.W + off * 0.6, y0, g.hz]]].map(e => e.map(q => P(...q)));
     let mi = [1e9, 1e9], ma = [-1e9, -1e9];
