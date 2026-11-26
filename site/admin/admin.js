@@ -137,6 +137,7 @@
     sinkTop: 450,       // € — мивка: готов горен модул (купува се; в цената за клиента — без надценка)
     sinkL: 1200, sinkD: 700, sinkSplash: 100,   // мм — модулът на мивката (с борд)
     sinkBowl: [450, 610, 290], sinkBowlEdge: 100,   // коритото: по дължината × отпред назад × дълбочина; от края на модула
+    rack10M: 24/6, rack2010M: 32/6,   // € за метър профил 10×10 и 20×10 (прът 6 м = 24 € / 32 €) — стойката за тави
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
@@ -216,10 +217,12 @@
     return { mat, tube, weld, bend, caps, buy, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
   }
   function priceFor(order){
-    if(!order||!order.tables||!order.tables.length) return null;
+    if(!order||!((order.tables||[]).length||(order.racks||[]).length)) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour + pp.buy;   // заварките и готовата мивка — без надценка
+    (order.tables||[]).forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour + pp.buy;   // заварките и готовата мивка — без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    (order.racks||[]).forEach(r=>{ const q=Math.max(1,Math.round(+r.qty||1)), rp=rackParts(r), per=rp.base*m + rp.labour;   // стойка за тави
+      total+=per*q; lines.push({label:"Стойка за тави"+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
       return { total, currency:"€", lines, promo:pc.code, discountPct:pc.pct, discount:d }; }
@@ -228,6 +231,117 @@
   // промокодове (без значение главни/малки букви) → отстъпка % върху цялата поръчка
   const PROMOS = { INOX15:15 };
   function promoOf(code){ const c=String(code||"").trim().toUpperCase(); return PROMOS[c] ? { code:c, pct:PROMOS[c] } : null; }
+  /* ===== СТОЙКА ЗА ТАВИ ЗА МИЯЛНА — ДРЪЖ ИДЕНТИЧНО в app.js и admin/admin.js =====
+     Основа — рамка от профил 20×10 (легнал) със среден напречен профил; прагове от профил 10×10 (триъгълник 45° —
+     всички срезове по 45°; или квадрат „П“ / трапец). Цена = профилите (€/м) × (1 + надценка%) + заварките (без надценка):
+     шев = половин обиколка на профила (както 30×30 = 6 см) → 20×10: 3 см, 10×10: 2 см. */
+  const RACK_STD = { shape:"tri", W:500, D:500, H:200, ang:45, top:300, n:6, bw:20, bh:10, t:10 };
+  const rf = n => String(Math.round(n * 10) / 10);
+  function rackGeo(p){
+    let H = Math.max(20, +p.H || 0);
+    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
+    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "tri";
+    if(shape === "tri"){ const ta = Math.min(75, Math.max(15, +p.ang || 45)); H = Math.round(D / 2 * Math.tan(ta * Math.PI / 180) * 10) / 10; }   // триъгълник: височината — от наклона
+    const top = shape === "trap" ? Math.min(D - 2 * t, Math.max(0, +p.top || 0)) : 0, a = shape === "trap" ? (D - top) / 2 : shape === "tri" ? D / 2 : 0;   // a — хоризонталното отместване на наклона
+    const ang = a > 0 ? Math.atan2(H, a) * 180 / Math.PI : 90;                            // наклон спрямо основата
+    const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
+    const len = (u, v) => Math.hypot(v[0] - u[0], v[1] - u[1]), mm = v => Math.round(v);   // дължините — на цял мм
+    // парчетата на един праг: многоъгълници в (дълбочина, височина над рамката)
+    let pieces, joints, hz;
+    if(shape === "rect"){ const hp = H - t;
+      pieces = [{ name:"Праг — стойка", per:2, polys:[[[0, 0], [t, 0], [t, hp], [0, hp]], [[D - t, 0], [D, 0], [D, hp], [D - t, hp]]], out:mm(hp), inn:mm(hp),
+                  note:"По 2 на праг. Двата края — прав срез 90°. Стои отвесно на ръба на рамката (отпред и отзад); горната част ляга върху стойките." },
+                { name:"Праг — горна част", per:1, polys:[[[0, hp], [D, hp], [D, H], [0, H]]], out:mm(D), inn:mm(D),
+                  note:"По 1 на праг. Двата края — прав срез 90°. Ляга върху двете стойки (челно)." }];
+      joints = 2; hz = D - t / 2;
+    } else {
+      const o = shape === "tri" ? [[0, 0], [a, H], [D, 0]] : [[0, 0], [a, H], [D - a, H], [D, 0]], c = rackContour(o, t);
+      const seg = k => [o[k], o[k + 1], c.i[k + 1], c.i[k]], foot = 90 - ang, mit = shape === "tri" ? ang : ang / 2;   // срезовете — от правия (90°)
+      const same = Math.abs(foot - mit) < 0.05;   // напр. 45° — и двата среза еднакви (едно нагласяне на циркуляра)
+      const leg = { name:"Праг — наклонена част (крак)", per:2, polys:[seg(0), seg(o.length - 2)], out:mm(len(o[0], o[1])), inn:mm(len(c.i[0], c.i[1])),
+        note:"По 2 на праг. " + (same && shape === "tri" ? "Двата края — срез " + rf(foot) + "° (едно нагласяне на циркуляра за всички парчета). " : "") +
+             "Размер: външна / вътрешна страна. Долу — срез " + rf(foot) + "° от правия (стъпва равно на рамката, наклон " + rf(ang) + "°); горе — " +
+             (shape === "tri" ? "срез " + rf(mit) + "° от правия (двата крака се срещат отгоре, отвесно)" : "фаска " + rf(mit) + "° от правия към горната част") + ". Парчето е трапец — външната страна е по-дългата и в двата края." };
+      pieces = [leg];
+      if(shape === "trap") pieces.push({ name:"Праг — горна част", per:1, polys:[seg(1)], out:mm(len(o[1], o[2])), inn:mm(len(c.i[1], c.i[2])),
+        note:"По 1 на праг. Размер: горна (външна) / долна (вътрешна) страна. Двата края — фаска " + rf(mit) + "° от правия." });
+      joints = shape === "tri" ? 1 : 2; hz = shape === "tri" ? D / 2 : D - a;
+    }
+    return { W, D, H, t, bw, bh, n, shape, top, a, ang, pitch, gap:pitch - t, xs, sideLen:Math.max(0, D - 2 * bw), midLen:Math.max(0, W - 2 * bw), pieces, joints, hz,
+             perPrag:pieces.reduce((s, q) => s + q.per * q.out, 0), nPieces:pieces.reduce((s, q) => s + q.per, 0) };
+  }
+  // външният контур на прага (от горния ръб на рамката) → вътрешният (профилът t е навътре); съединенията са по ъглополовящите
+  function rackContour(o, t){
+    const cx = o.reduce((s, q) => s + q[0], 0) / o.length, cy = o.reduce((s, q) => s + q[1], 0) / o.length;
+    const lines = o.slice(0, -1).map((_, k) => { const [x1, y1] = o[k], [x2, y2] = o[k + 1], l = Math.hypot(x2 - x1, y2 - y1); let nx = -(y2 - y1) / l, ny = (x2 - x1) / l;
+      if(nx * (cx - (x1 + x2) / 2) + ny * (cy - (y1 + y2) / 2) < 0){ nx = -nx; ny = -ny; } return { p:[x1 + nx * t, y1 + ny * t], d:[(x2 - x1) / l, (y2 - y1) / l] }; });
+    const cross = (A, B) => { const det = A.d[0] * B.d[1] - A.d[1] * B.d[0]; if(Math.abs(det) < 1e-9) return A.p;
+      const u = ((B.p[0] - A.p[0]) * B.d[1] - (B.p[1] - A.p[1]) * B.d[0]) / det; return [A.p[0] + A.d[0] * u, A.p[1] + A.d[1] * u]; };
+    const base = { p:[0, o[0][1]], d:[1, 0] };
+    return { o, i:[cross(lines[0], base)].concat(lines.slice(1).map((L, k) => cross(lines[k], L)), [cross(lines[lines.length - 1], base)]) };
+  }
+  // 3D (изометрия) — същият стил като чертежите на масите
+  function rackSvg(p, opt){
+    opt = opt || {}; const uid = opt.uid || ("rk" + (rackSvg.n = (rackSvg.n || 0) + 1));   // свои id за всеки чертеж (иначе скритите картинки го правят прозрачен)
+    // гледа се почти отстрани на праговете (ширината — скъсена, надолу; дълбочината — почти хоризонтално): при изометрия
+    // наклон 45° на праговете ляга точно по оста на чертежа и краката им се сливат в една линия
+    const AX = [0.35, 0.6], AZ = [0.97, 0.25];
+    const g = rackGeo(p), P = (x, y, z) => ({ x:x * AX[0] - z * AZ[0], y:x * AX[1] + z * AZ[1] - y }), quads = [], dims = [];
+    const V = [1, AX[1] + AX[0] * AZ[1] / AZ[0], AX[0] / AZ[0]];
+    let layer = 0;   // посоката към зрителя (там проекцията се слива в точка)
+    const face = (pts, nrm, fill) => { if(nrm[0] * V[0] + nrm[1] * V[1] + nrm[2] * V[2] <= 0) return;
+      const c = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+      quads.push({ layer, d:c[0] * V[0] + c[1] * V[1] + c[2] * V[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
+    const TOP = "url(#" + uid + "rT)", FR = "url(#" + uid + "rF)", RI = "url(#" + uid + "rR)";
+    const box = (x, y, z, w, h, d) => { const X = x + w, Y = y + h, Z = z + d;
+      face([[x,Y,z],[X,Y,z],[X,Y,Z],[x,Y,Z]], [0,1,0], TOP); face([[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], FR); face([[X,y,z],[X,Y,z],[X,Y,Z],[X,y,Z]], [1,0,0], RI);
+      face([[x,y,z],[x,Y,z],[x,Y,Z],[x,y,Z]], [-1,0,0], RI); face([[x,y,z],[X,y,z],[X,Y,z],[x,Y,z]], [0,0,-1], FR); };
+    // рамката: отпред и отзад по цялата ширина, отстрани — между тях
+    box(0, 0, g.D - g.bw, g.W, g.bh, g.bw); box(0, 0, 0, g.W, g.bh, g.bw);
+    box(0, 0, g.bw, g.bw, g.bh, g.sideLen); box(g.W - g.bw, 0, g.bw, g.bw, g.bh, g.sideLen);
+    box(g.bw, 0, g.D / 2 - g.bw / 2, g.midLen, g.bh, g.bw);   // среден профил — напречно, за здравина
+    // праговете: трапец (отпред нагоре, отгоре, отзад надолу); профилът t×t е навътре от външния контур
+    const y0 = g.bh;   // всяко парче — призма: многоъгълникът (дълбочина, височина) × дебелината t
+    const prism = (x0, x1, poly) => { const cz = poly.reduce((a, q) => a + q[0], 0) / poly.length, cy = poly.reduce((a, q) => a + q[1], 0) / poly.length, P3 = (x, q) => [x, y0 + q[1], q[0]];
+      face(poly.map(q => P3(x1, q)), [1, 0, 0], RI); face(poly.map(q => P3(x0, q)), [-1, 0, 0], RI);
+      poly.forEach((q, k) => { const r = poly[(k + 1) % poly.length], L = Math.hypot(r[0] - q[0], r[1] - q[1]) || 1; let nz = (r[1] - q[1]) / L, ny = -(r[0] - q[0]) / L;
+        if(nz * ((q[0] + r[0]) / 2 - cz) + ny * ((q[1] + r[1]) / 2 - cy) < 0){ nz = -nz; ny = -ny; }
+        face([P3(x0, q), P3(x1, q), P3(x1, r), P3(x0, r)], [0, ny, nz], ny > 0.7 ? TOP : nz > 0 ? FR : RI); }); };
+    layer = 1;   // праговете — над основата (основата е отдолу и не ги закрива, затова се рисува първа)
+    g.xs.forEach(x0 => g.pieces.forEach(pc => pc.polys.forEach(poly => prism(x0, x0 + g.t, poly))));
+    quads.sort((a, b) => a.layer - b.layer || a.d - b.d);
+    // размери
+    const off = Math.max(g.W, g.D) * 0.16;
+    const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
+    dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
+    dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
+    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], rf(g.H), 8, 0, "start");
+    const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
+                 [[g.W, y0 + g.H, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz]], [[g.W, y0, g.hz], [g.W + off * 0.6, y0, g.hz]]].map(e => e.map(q => P(...q)));
+    if(opt.noDims){ dims.length = 0; ext.length = 0; }
+    let mi = [1e9, 1e9], ma = [-1e9, -1e9];
+    quads.forEach(q => q.pts.forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    dims.forEach(d => [d.a, d.b].forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    const VW = 900, VH = 620, pad = 60, sc = Math.min((VW - 2 * pad) / (ma[0] - mi[0]), (VH - 2 * pad) / (ma[1] - mi[1]));
+    const ox = (VW - (ma[0] - mi[0]) * sc) / 2, oy = (VH - (ma[1] - mi[1]) * sc) / 2, X = v => (ox + (v - mi[0]) * sc).toFixed(1), Y = v => (oy + (v - mi[1]) * sc).toFixed(1);
+    const grad = (id, a, b) => '<linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + a + '"/><stop offset="1" stop-color="' + b + '"/></linearGradient>';
+    let s = '<svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"><defs>' +
+      '<marker id="' + uid + 'rAr" markerWidth="9" markerHeight="9" refX="4.5" refY="4.5" orient="auto"><path d="M1 1L8 4.5L1 8" fill="none" stroke="#1E6FF4" stroke-width="1.4"/></marker>' +
+      grad(uid + "rT", "#f3f8fc", "#dae6f0") + grad(uid + "rF", "#d2dde9", "#b1c3d6") + grad(uid + "rR", "#b7c7d9", "#94a9be") + '</defs>';
+    s += '<polygon points="' + [P(-20, 0, -20), P(g.W + 20, 0, -20), P(g.W + 20, 0, g.D + 20), P(-20, 0, g.D + 20)].map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="#334155" opacity="0.07"/>';
+    quads.forEach(q => s += '<polygon points="' + q.pts.map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="' + q.fill + '" stroke="#5f7d9e" stroke-width="0.8" stroke-linejoin="round"/>');
+    ext.forEach(([a, b]) => s += '<line x1="' + X(a.x) + '" y1="' + Y(a.y) + '" x2="' + X(b.x) + '" y2="' + Y(b.y) + '" stroke="#9fb3c8" stroke-width="0.8"/>');
+    dims.forEach(d => { s += '<line x1="' + X(d.a.x) + '" y1="' + Y(d.a.y) + '" x2="' + X(d.b.x) + '" y2="' + Y(d.b.y) + '" stroke="#1E6FF4" stroke-width="1.2" marker-start="url(#' + uid + 'rAr)" marker-end="url(#' + uid + 'rAr)"/>' +
+      '<text x="' + (+X((d.a.x + d.b.x) / 2) + d.dx) + '" y="' + (+Y((d.a.y + d.b.y) / 2) + d.dy) + '" text-anchor="' + d.anchor + '" font-size="18" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:4px">' + esc(d.txt) + '</text>'; });
+    return s + '</svg>';
+  }
+  function rackParts(r){
+    const g = rackGeo(Object.assign({}, RACK_STD, r || {}));
+    const m20 = (2 * g.W + 2 * g.sideLen + g.midLen) / 1000, m10 = g.n * g.perPrag / 1000;   // метри профил
+    const cm = 6 * (g.bw + g.bh) / 10 + g.n * (g.joints + 2) * (2 * g.t) / 10;               // 4 ъгъла + 2 на средния; на праг — съединенията + 2 крака
+    const mat = m20 * PRICE.rack2010M + m10 * PRICE.rack10M, weld = cm * PRICE.weldPerCm;
+    return { g, m20, m10, cm, mat, weld, base:mat, labour:weld };
+  }
   const eur2 = v => (v==null?"—":(Math.round(v*100)/100).toFixed(2)+" €");
   let PRICING = null; // latest computed pricing for the loaded order (set in recompute)
 
@@ -269,8 +383,9 @@
   const serTxt = o => o && o.serial ? orderSerial(o.serial) : "без №";
   const nTablesOf = o => (o.tables || []).reduce((a, t) => a + (+t.qty || 1), 0);
   // what an order holds, for the lists: "2", "2 + 3 дет.", "3 дет."
-  const itemsTxt = o => { const t = nTablesOf(o), d = (o.parts || []).reduce((a, p) => a + (+p.qty || 1), 0), e = (o.assemblies || []).reduce((a, x) => a + (+x.qty || 1), 0);
-    const bits = [t ? String(t) : "", d ? d + " дет." : "", e ? e + " ел." : ""].filter(Boolean); return bits.length ? bits.join(" + ") : "0"; };
+  const itemsTxt = o => { const t = nTablesOf(o), d = (o.parts || []).reduce((a, p) => a + (+p.qty || 1), 0), e = (o.assemblies || []).reduce((a, x) => a + (+x.qty || 1), 0),
+      r = (o.racks || []).reduce((a, x) => a + (+x.qty || 1), 0);
+    const bits = [t ? String(t) : "", d ? d + " дет." : "", e ? e + " ел." : "", r ? r + " ст." : ""].filter(Boolean); return bits.length ? bits.join(" + ") : "0"; };
   const fmtDate = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleDateString("bg-BG") : ""; };
   const fmtDT = s => { const d = s ? new Date(s) : null; return d && !isNaN(d) ? d.toLocaleString("bg-BG", { dateStyle:"short", timeStyle:"short" }) : ""; };
   const idsTxt = list => list.length ? list.join(", ") : "—";
@@ -282,7 +397,7 @@
       [+t.qty || 1, +t.L || 0, +t.D || 0, +t.H || 0, !!t.splashOn, +t.splashH || 0, +t.legBack || 0, !!t.baseOn, +t.baseH || 0, !!t.midOn]
         .concat(["topEdge","shelfEdge","baseEdge","midEdge","topRet","baseRet","midRet","legSpan","legFL","legFR","legBL","legBR","hem"].map(k => +t[k] || 0), [t.hemDir || ""],
           +t.sideL || +t.sideR ? [+t.sideL || 0, +t.sideR || 0] : [], t.splashOn && +t.splashBack ? ["sb", +t.splashBack] : [], isFrame(t) ? ["frame"] : [],
-          t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0, +t.gnLevels || 0, +t.gnPitch || 0] : [], t.gn ? ["gn", t.gnSide || "left", +t.gnLevels || 0, +t.gnPitch || 0] : []))]);
+          t.legs6 ? [true, t.shelfSide || "left", +t.bayL || 0, !!t.rails, +t.railH || 0, +t.gnLevels || 0, +t.gnPitch || 0] : [], t.gn ? ["gn", t.gnSide || "left", +t.gnLevels || 0, +t.gnPitch || 0] : [])), (o.racks || []).map(r => [r.shape, +r.qty || 1])]);
     let h = 5381; for(let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) >>> 0;
     return h.toString(36) + s.length.toString(36);
   }
@@ -296,7 +411,7 @@
     if(!m) return null;
     const bin = atob(m[1]);
     const data = JSON.parse(new TextDecoder().decode(Uint8Array.from(bin, c => c.charCodeAt(0))));
-    if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_data");
+    if(!hasItems(data)) throw new Error("bad_data");
     return data;
   }
 
@@ -319,18 +434,23 @@
     const where = [x.city, x.address].filter(Boolean).join(", ");
     return where ? DLV[x.type] + " — " + where : "";
   }
+  // стойка за тави от клиентската форма: стандартните размери + брой
+  function normRack(r){ const n = Object.assign({}, RACK_STD);
+    Object.keys(RACK_STD).forEach(k => { if(r && r[k] !== undefined && r[k] !== null) n[k] = typeof RACK_STD[k] === "number" ? (+r[k] || RACK_STD[k]) : String(r[k]); });
+    n.qty = Math.max(1, Math.round(+(r && r.qty) || 1)); return n; }
+  const hasItems = d => !!d && ((Array.isArray(d.tables) && d.tables.length) || (Array.isArray(d.racks) && d.racks.length));
   function makeRecord(data, source){
     const d = data || {};
     const delivery = d.delivery ? normDelivery(d.delivery) : null;
     return { id:newId(), stage:"new", serial:null, addedAt:new Date().toISOString(),
       name:d.name || "", phone:d.phone || "", created:d.created || "", source:source || "", orderNo:d.orderNo || "",
-      promo:(promoOf(d.promo) || {}).code || "", priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : [{ hemDir:"wall" }]).map(normTable),
+      promo:(promoOf(d.promo) || {}).code || "", priceFromPdf:d.price || null, tables:(d.tables && d.tables.length ? d.tables : d.racks && d.racks.length ? [] : [{ hemDir:"wall" }]).map(normTable), racks:(d.racks || []).map(normRack),
       hasDoc:false, docName:"", cut:null, clientPrice:null, cost:null, costMaterials:null, price:null, place:"", deliveryDate:"", delivery };
   }
   async function readOrderFile(file){
     if(/\.json$/i.test(file.name)){
       const data = JSON.parse(await file.text());
-      if(!data || !Array.isArray(data.tables) || !data.tables.length) throw new Error("bad_json");
+      if(!hasItems(data)) throw new Error("bad_json");
       return { data, doc:null };
     }
     const buf = await file.arrayBuffer();
@@ -401,6 +521,7 @@
     order.tables = order.tables.map(normTable);
     order.parts = (order.parts || []).map(normPart);
     order.assemblies = (order.assemblies || []).map(x => normAsm(x));
+    order.racks = (order.racks || []).map(normRack);
     host.appendChild(v); v.hidden = false;
     setTab(TAB);
     renderHead(); renderEdit(); recompute();
@@ -458,7 +579,7 @@
       '</div></div>';
     o.tables.forEach((t, i) => {
       h += '<div class="card tbl" data-i="' + i + '"><h2 class="tablehead"><span class="name">Маса ' + (i + 1) + '</span>' +
-        ((o.tables.length > 1 || o.parts.length || o.assemblies.length) && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
+        ((o.tables.length > 1 || o.parts.length || o.assemblies.length || o.racks.length) && !ro ? '<button class="btn danger" data-act="del" type="button">✕ Премахни</button>' : '') + '</h2>' +
         '<div class="tgrid"><div class="drawbox"><svg class="draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"></svg></div>' +
         '<div><div class="grid">' +
         FIELDS.map(([k,l,u]) => '<label>' + esc(l) + ' <span class="u">(' + u + ')</span><input type="number" min="0" step="1" data-k="' + k + '" value="' + esc(t[k]) + '"' + dis + '></label>').join("") +
@@ -513,6 +634,12 @@
         '<div class="muted">' + a.items.length + ' детайла · габарит ' + (r.size || [0, 0, 0]).map(v => fmt(v)).join(" × ") + ' мм · заварки ' + asmJoints(a).filter(x => x.on).length + '</div>' +
         (r.svg ? '<figure class="scheme"><svg viewBox="0 0 ' + r.VW + ' ' + r.VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif" style="background:#f8fafc">' + r.svg + '</svg></figure>' : '') + '</div>';
     });
+    o.racks.forEach((r, j) => {
+      h += '<div class="card rackcard" data-rk="' + j + '"><h2 class="tablehead"><span class="name">Стойка за тави за миялна машина</span>' +
+        (ro ? '' : '<button class="btn danger" data-rkact="del" type="button">✕ Премахни</button>') + '</h2>' +
+        '<div class="tgrid"><div class="drawbox">' + rackSvg(r) + '</div><div><div class="grid"><label>Брой <span class="u">(бр.)</span><input type="number" min="1" step="1" data-rkq value="' + r.qty + '"' + dis + '></label></div>' +
+        '<div class="muted" style="margin-top:6px">Стандартна (от клиентската форма): основа ' + r.W + ' × ' + r.D + ' мм, ' + r.n + ' прага — ' + RACK_SHAPE[r.shape] + '. Чертежът и разкроят са в печата; размерите се сменят в „Готови чертежи“.</div></div></div></div>';
+    });
     if(!ro) h += '<div class="row" style="margin:-4px 0 16px"><button class="btn" id="addT" type="button">➕ Добави маса</button>' +
       '<button class="btn" id="addP" type="button">➕ Добави детайл (конструктор)</button>' +
       '<button class="btn" id="addA" type="button">➕ Добави елемент (сглобка)</button></div>';
@@ -531,6 +658,12 @@
         if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
         o.parts.splice(j, 1); renderEdit(); recompute(); edited();
       });
+    });
+    document.querySelectorAll("#order .rackcard").forEach(card => {
+      const j = +card.dataset.rk, r = o.racks[j], qi = card.querySelector("[data-rkq]"), del = card.querySelector('[data-rkact="del"]');
+      if(qi) qi.addEventListener("input", () => { r.qty = Math.max(1, Math.round(+qi.value || 1)); recompute(); edited(); });
+      if(del) del.addEventListener("click", () => { if(del.dataset.armed !== "1"){ del.dataset.armed = "1"; del.textContent = "Сигурно? Натисни пак"; return; }
+        o.racks.splice(j, 1); renderEdit(); recompute(); edited(); });
     });
     document.querySelectorAll("#order .asmcard").forEach(card => {
       const j = +card.dataset.aj, a = o.assemblies[j];
@@ -1448,6 +1581,7 @@
     o.tables.forEach(t => { const pp = priceParts(t), q = t.qty;
       matOurs += (pp.mat + pp.buy) * q; tubeOurs += pp.tube * q; weldOurs += pp.weld * q; bendOurs += pp.bend * q; capsOurs += pp.caps * q; });
     parts.forEach(r => { matOurs += Math.max(0, r.g.area) / 1e6 * PRICE.sheetM2 * (r.p.th / 1.5) * r.p.qty; bendOurs += r.g.bends * PRICE.bend * r.p.qty; });
+    (o.racks || []).forEach(r => { const rp = rackParts(r); tubeOurs += rp.mat * r.qty; weldOurs += rp.weld * r.qty; });   // стойки за тави: профилите + заварките
     (o.assemblies || []).forEach(a => { weldOurs += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
     const costMaterials = matOurs + tubeOurs;
     const costTotal = costMaterials + weldOurs + bendOurs + capsOurs;
@@ -1460,7 +1594,7 @@
     let h = '<div class="card"><h2>' + esc(o.serial ? "Поръчка " + orderSerial(o.serial) : "Поръчка — чака потвърждение на разкроя") + '</h2>' +
       '<div class="printsum">Клиент: <b>' + esc(o.name || "—") + '</b> · Телефон: <b>' + esc(o.phone || "—") + '</b>' +
         (promoOf(o.promo) ? ' · Промокод: <b>' + esc(promoOf(o.promo).code) + ' (−' + promoOf(o.promo).pct + '%)</b>' : '') +
-        (nTables ? ' · Маси: <b>' + nTables + '</b>' : '') + (nParts ? ' · Детайли: <b>' + nParts + '</b>' : '') +
+        (nTables ? ' · Маси: <b>' + nTables + '</b>' : '') + (nParts ? ' · Детайли: <b>' + nParts + '</b>' : '') + ((o.racks || []).length ? ' · Стойки за тави: <b>' + o.racks.reduce((a, r) => a + r.qty, 0) + '</b>' : '') +
         (deliveryText(o.delivery) ? '<br>Доставка: <b>' + esc(deliveryText(o.delivery)) + '</b>' : '') + '</div>' +
       '<div class="muted" style="margin-top:4px">' + esc(o.source ? "Файл: " + o.source : "Ръчно въведена поръчка") + (cr ? " · създадена от клиента " + esc(cr) : "") + '</div></div>';
 
@@ -1547,6 +1681,18 @@
         (r.bendRows.length ? '<h3>Огъвания — линии от ръба на заготовката (мм)</h3><div class="tw"><table class="cut bends"><thead><tr><th>Страна</th><th>Профил (външни размери)</th><th>Линии на огъване от ръба</th></tr></thead><tbody>' +
           r.bendRows.map(b => '<tr><td>' + esc(b.side) + '</td><td>' + esc(b.profile) + '</td><td class="size">' + esc(b.lines) + '</td></tr>').join("") + '</tbody></table></div>' : '') +
         '<h3>Схема</h3><div class="schemes">' + partSvg(p, r.g) + '</div></div>';
+    });
+
+    // стойки за тави: чертеж (част 1) и разкрой на профилите (част 2)
+    (o.racks || []).forEach((r, i) => {
+      const g = rackGeo(r), v = rackViews(r), rows = rackRows(r), tag = "Стойка за тави" + ((o.racks.length > 1) ? " " + (i + 1) : "");
+      hDraw += '<div class="card tdraw"><h2>' + tag + (r.qty > 1 ? ' — ' + r.qty + ' бр. еднакви' : '') + '</h2><div class="printsum">Основа <b>' + g.W + ' × ' + g.D + ' мм</b> от профил ' + g.bw + '×' + g.bh +
+        ' (със среден профил) · ' + g.n + ' прага от профил ' + g.t + '×' + g.t + ' — ' + RACK_SHAPE[g.shape] + ', височина ' + fmt(g.H) + ' мм · между праговете ' + fmt(g.pitch) + ' мм по осите (светло ' + fmt(g.gap) + ' мм) · брой: <b>' + r.qty + '</b></div>' +
+        '<div class="rdy3d">' + rackSvg(r) + '</div><div class="rdyviews">' + v.front + v.side + '</div></div>';
+      h += '<div class="card tcut"><h2>' + tag + ' — разкрой' + (r.qty > 1 ? ' (' + r.qty + ' бр. еднакви)' : '') + '</h2>' +
+        '<h3>Детайли за рязане' + (r.qty > 1 ? ' — за ' + r.qty + ' бр.' : '') + '</h3><div class="tw"><table class="cut"><thead><tr><th>Детайл</th><th>Материал</th><th>Размер (мм)</th><th>Бр.</th><th>Бележка</th></tr></thead><tbody>' +
+        rows.map(x => '<tr><td>' + esc(x.part) + '</td><td>' + esc(x.mat) + '</td><td class="size">' + esc(x.size) + '</td><td class="q">' + (x.qty * r.qty) + '</td><td>' + esc(x.note) + '</td></tr>').join("") +
+        '</tbody></table></div></div>';
     });
 
     if(allUsed.length || allSheets.length){
@@ -1943,6 +2089,7 @@
       mat += (pp.mat + pp.buy) * q; tube += pp.tube * q; weld += pp.weld * q; bend += pp.bend * q; caps += pp.caps * q; });
     const part = (p, q) => { const g = partGeo(p); mat += Math.max(0, g.area) / 1e6 * PRICE.sheetM2 * (p.th / 1.5) * q; bend += g.bends * PRICE.bend * q; };
     (o.parts || []).map(normPart).forEach(p => part(p, p.qty));
+    (o.racks || []).map(normRack).forEach(r => { const rp = rackParts(r); tube += rp.mat * r.qty; weld += rp.weld * r.qty; });
     (o.assemblies || []).map(x => normAsm(x)).forEach(a => { a.items.forEach(it => part(it.part, it.part.qty * a.qty));
       weld += asmJoints(a).filter(j => j.on).reduce((s2, j) => s2 + j.cm * (+S.weldPerCm || 0), 0) * a.qty; });
     return { clientPrice:orderClientPrice(o), cost:mat + tube + weld + bend + caps, costMaterials:mat + tube, weld, bend };
@@ -2629,7 +2776,7 @@
   }
   // цената преди отстъпката (маси + детайли + елементи)
   function orderGross(o){
-    const t = (o.tables && o.tables.length) ? priceFor({ tables:o.tables.map(normTable) }) : null;
+    const t = priceFor({ tables:(o.tables || []).map(normTable), racks:(o.racks || []).map(normRack) });
     const parts = (o.parts || []).map(normPart).reduce((a, p) => a + partPrice(p), 0);
     const asms = (o.assemblies || []).map(x => normAsm(x)).reduce((a, x) => a + asmPrice(x), 0);
     return (t ? t.total : 0) + parts + asms;
@@ -3389,6 +3536,11 @@
             [{ x:0, y:0, z:0, dx:L, dy:D, dz:H * n, role:"part" }], false));
         }
       });
+      (o.racks || []).map(normRack).forEach((r, i) => {   // стойка за тави — кутия с габарита ѝ; ≈ 0.44 кг/м (20×10) и 0.29 кг/м (10×10) при стена 1 мм
+        const rp = rackParts(r), g = rp.g, kg = rp.m20 * 0.444 + rp.m10 * 0.285;
+        for(let k = 0; k < r.qty; k++) units.push(makeUnit({ label:tag + " С" + (i + 1) + (r.qty > 1 ? "." + (k + 1) : ""), name:"стойка за тави", kind:"part", kg },
+          [{ x:0, y:0, z:0, dx:g.W, dy:g.D, dz:g.bh + g.H, role:"part" }], false));
+      });
       (o.assemblies || []).map(a => normAsm(a)).forEach((a, i) => {
         if(!a.items.length) return;
         const boxes = a.items.map(it => itemBox(it)), mn = [0, 1, 2].map(k => Math.min(...boxes.map(b => b.min[k])));
@@ -3663,102 +3815,6 @@
   };
   let RDY_KEY = "rack", RDY = {};
   const rdyDefaults = k => Object.fromEntries(READY[k].fields.map(f => [f[0], f[3]]));
-  function rackGeo(p){
-    let H = Math.max(20, +p.H || 0);
-    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
-    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "tri";
-    if(shape === "tri"){ const ta = Math.min(75, Math.max(15, +p.ang || 45)); H = Math.round(D / 2 * Math.tan(ta * Math.PI / 180) * 10) / 10; }   // триъгълник: височината — от наклона
-    const top = shape === "trap" ? Math.min(D - 2 * t, Math.max(0, +p.top || 0)) : 0, a = shape === "trap" ? (D - top) / 2 : shape === "tri" ? D / 2 : 0;   // a — хоризонталното отместване на наклона
-    const ang = a > 0 ? Math.atan2(H, a) * 180 / Math.PI : 90;                            // наклон спрямо основата
-    const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
-    const len = (u, v) => Math.hypot(v[0] - u[0], v[1] - u[1]), mm = v => Math.round(v);   // дължините — на цял мм
-    // парчетата на един праг: многоъгълници в (дълбочина, височина над рамката)
-    let pieces, joints, hz;
-    if(shape === "rect"){ const hp = H - t;
-      pieces = [{ name:"Праг — стойка", per:2, polys:[[[0, 0], [t, 0], [t, hp], [0, hp]], [[D - t, 0], [D, 0], [D, hp], [D - t, hp]]], out:mm(hp), inn:mm(hp),
-                  note:"По 2 на праг. Двата края — прав срез 90°. Стои отвесно на ръба на рамката (отпред и отзад); горната част ляга върху стойките." },
-                { name:"Праг — горна част", per:1, polys:[[[0, hp], [D, hp], [D, H], [0, H]]], out:mm(D), inn:mm(D),
-                  note:"По 1 на праг. Двата края — прав срез 90°. Ляга върху двете стойки (челно)." }];
-      joints = 2; hz = D - t / 2;
-    } else {
-      const o = shape === "tri" ? [[0, 0], [a, H], [D, 0]] : [[0, 0], [a, H], [D - a, H], [D, 0]], c = rackContour(o, t);
-      const seg = k => [o[k], o[k + 1], c.i[k + 1], c.i[k]], foot = 90 - ang, mit = shape === "tri" ? ang : ang / 2;   // срезовете — от правия (90°)
-      const same = Math.abs(foot - mit) < 0.05;   // напр. 45° — и двата среза еднакви (едно нагласяне на циркуляра)
-      const leg = { name:"Праг — наклонена част (крак)", per:2, polys:[seg(0), seg(o.length - 2)], out:mm(len(o[0], o[1])), inn:mm(len(c.i[0], c.i[1])),
-        note:"По 2 на праг. " + (same && shape === "tri" ? "Двата края — срез " + fmt(foot) + "° (едно нагласяне на циркуляра за всички парчета). " : "") +
-             "Размер: външна / вътрешна страна. Долу — срез " + fmt(foot) + "° от правия (стъпва равно на рамката, наклон " + fmt(ang) + "°); горе — " +
-             (shape === "tri" ? "срез " + fmt(mit) + "° от правия (двата крака се срещат отгоре, отвесно)" : "фаска " + fmt(mit) + "° от правия към горната част") + ". Парчето е трапец — външната страна е по-дългата и в двата края." };
-      pieces = [leg];
-      if(shape === "trap") pieces.push({ name:"Праг — горна част", per:1, polys:[seg(1)], out:mm(len(o[1], o[2])), inn:mm(len(c.i[1], c.i[2])),
-        note:"По 1 на праг. Размер: горна (външна) / долна (вътрешна) страна. Двата края — фаска " + fmt(mit) + "° от правия." });
-      joints = shape === "tri" ? 1 : 2; hz = shape === "tri" ? D / 2 : D - a;
-    }
-    return { W, D, H, t, bw, bh, n, shape, top, a, ang, pitch, gap:pitch - t, xs, sideLen:Math.max(0, D - 2 * bw), midLen:Math.max(0, W - 2 * bw), pieces, joints, hz,
-             perPrag:pieces.reduce((s, q) => s + q.per * q.out, 0), nPieces:pieces.reduce((s, q) => s + q.per, 0) };
-  }
-  // външният контур на прага (от горния ръб на рамката) → вътрешният (профилът t е навътре); съединенията са по ъглополовящите
-  function rackContour(o, t){
-    const cx = o.reduce((s, q) => s + q[0], 0) / o.length, cy = o.reduce((s, q) => s + q[1], 0) / o.length;
-    const lines = o.slice(0, -1).map((_, k) => { const [x1, y1] = o[k], [x2, y2] = o[k + 1], l = Math.hypot(x2 - x1, y2 - y1); let nx = -(y2 - y1) / l, ny = (x2 - x1) / l;
-      if(nx * (cx - (x1 + x2) / 2) + ny * (cy - (y1 + y2) / 2) < 0){ nx = -nx; ny = -ny; } return { p:[x1 + nx * t, y1 + ny * t], d:[(x2 - x1) / l, (y2 - y1) / l] }; });
-    const cross = (A, B) => { const det = A.d[0] * B.d[1] - A.d[1] * B.d[0]; if(Math.abs(det) < 1e-9) return A.p;
-      const u = ((B.p[0] - A.p[0]) * B.d[1] - (B.p[1] - A.p[1]) * B.d[0]) / det; return [A.p[0] + A.d[0] * u, A.p[1] + A.d[1] * u]; };
-    const base = { p:[0, o[0][1]], d:[1, 0] };
-    return { o, i:[cross(lines[0], base)].concat(lines.slice(1).map((L, k) => cross(lines[k], L)), [cross(lines[lines.length - 1], base)]) };
-  }
-  // 3D (изометрия) — същият стил като чертежите на масите
-  function rackSvg(p){
-    // гледа се почти отстрани на праговете (ширината — скъсена, надолу; дълбочината — почти хоризонтално): при изометрия
-    // наклон 45° на праговете ляга точно по оста на чертежа и краката им се сливат в една линия
-    const AX = [0.35, 0.6], AZ = [0.97, 0.25];
-    const g = rackGeo(p), P = (x, y, z) => ({ x:x * AX[0] - z * AZ[0], y:x * AX[1] + z * AZ[1] - y }), quads = [], dims = [];
-    const V = [1, AX[1] + AX[0] * AZ[1] / AZ[0], AX[0] / AZ[0]];
-    let layer = 0;   // посоката към зрителя (там проекцията се слива в точка)
-    const face = (pts, nrm, fill) => { if(nrm[0] * V[0] + nrm[1] * V[1] + nrm[2] * V[2] <= 0) return;
-      const c = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
-      quads.push({ layer, d:c[0] * V[0] + c[1] * V[1] + c[2] * V[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
-    const TOP = "url(#rT)", FR = "url(#rF)", RI = "url(#rR)";
-    const box = (x, y, z, w, h, d) => { const X = x + w, Y = y + h, Z = z + d;
-      face([[x,Y,z],[X,Y,z],[X,Y,Z],[x,Y,Z]], [0,1,0], TOP); face([[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], FR); face([[X,y,z],[X,Y,z],[X,Y,Z],[X,y,Z]], [1,0,0], RI);
-      face([[x,y,z],[x,Y,z],[x,Y,Z],[x,y,Z]], [-1,0,0], RI); face([[x,y,z],[X,y,z],[X,Y,z],[x,Y,z]], [0,0,-1], FR); };
-    // рамката: отпред и отзад по цялата ширина, отстрани — между тях
-    box(0, 0, g.D - g.bw, g.W, g.bh, g.bw); box(0, 0, 0, g.W, g.bh, g.bw);
-    box(0, 0, g.bw, g.bw, g.bh, g.sideLen); box(g.W - g.bw, 0, g.bw, g.bw, g.bh, g.sideLen);
-    box(g.bw, 0, g.D / 2 - g.bw / 2, g.midLen, g.bh, g.bw);   // среден профил — напречно, за здравина
-    // праговете: трапец (отпред нагоре, отгоре, отзад надолу); профилът t×t е навътре от външния контур
-    const y0 = g.bh;   // всяко парче — призма: многоъгълникът (дълбочина, височина) × дебелината t
-    const prism = (x0, x1, poly) => { const cz = poly.reduce((a, q) => a + q[0], 0) / poly.length, cy = poly.reduce((a, q) => a + q[1], 0) / poly.length, P3 = (x, q) => [x, y0 + q[1], q[0]];
-      face(poly.map(q => P3(x1, q)), [1, 0, 0], RI); face(poly.map(q => P3(x0, q)), [-1, 0, 0], RI);
-      poly.forEach((q, k) => { const r = poly[(k + 1) % poly.length], L = Math.hypot(r[0] - q[0], r[1] - q[1]) || 1; let nz = (r[1] - q[1]) / L, ny = -(r[0] - q[0]) / L;
-        if(nz * ((q[0] + r[0]) / 2 - cz) + ny * ((q[1] + r[1]) / 2 - cy) < 0){ nz = -nz; ny = -ny; }
-        face([P3(x0, q), P3(x1, q), P3(x1, r), P3(x0, r)], [0, ny, nz], ny > 0.7 ? TOP : nz > 0 ? FR : RI); }); };
-    layer = 1;   // праговете — над основата (основата е отдолу и не ги закрива, затова се рисува първа)
-    g.xs.forEach(x0 => g.pieces.forEach(pc => pc.polys.forEach(poly => prism(x0, x0 + g.t, poly))));
-    quads.sort((a, b) => a.layer - b.layer || a.d - b.d);
-    // размери
-    const off = Math.max(g.W, g.D) * 0.16;
-    const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
-    dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
-    dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
-    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], fmt(g.H), 8, 0, "start");
-    const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
-                 [[g.W, y0 + g.H, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz]], [[g.W, y0, g.hz], [g.W + off * 0.6, y0, g.hz]]].map(e => e.map(q => P(...q)));
-    let mi = [1e9, 1e9], ma = [-1e9, -1e9];
-    quads.forEach(q => q.pts.forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
-    dims.forEach(d => [d.a, d.b].forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
-    const VW = 900, VH = 620, pad = 60, sc = Math.min((VW - 2 * pad) / (ma[0] - mi[0]), (VH - 2 * pad) / (ma[1] - mi[1]));
-    const ox = (VW - (ma[0] - mi[0]) * sc) / 2, oy = (VH - (ma[1] - mi[1]) * sc) / 2, X = v => (ox + (v - mi[0]) * sc).toFixed(1), Y = v => (oy + (v - mi[1]) * sc).toFixed(1);
-    const grad = (id, a, b) => '<linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + a + '"/><stop offset="1" stop-color="' + b + '"/></linearGradient>';
-    let s = '<svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"><defs>' +
-      '<marker id="rAr" markerWidth="9" markerHeight="9" refX="4.5" refY="4.5" orient="auto"><path d="M1 1L8 4.5L1 8" fill="none" stroke="#1E6FF4" stroke-width="1.4"/></marker>' +
-      grad("rT", "#f3f8fc", "#dae6f0") + grad("rF", "#d2dde9", "#b1c3d6") + grad("rR", "#b7c7d9", "#94a9be") + '</defs>';
-    s += '<polygon points="' + [P(-20, 0, -20), P(g.W + 20, 0, -20), P(g.W + 20, 0, g.D + 20), P(-20, 0, g.D + 20)].map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="#334155" opacity="0.07"/>';
-    quads.forEach(q => s += '<polygon points="' + q.pts.map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="' + q.fill + '" stroke="#5f7d9e" stroke-width="0.8" stroke-linejoin="round"/>');
-    ext.forEach(([a, b]) => s += '<line x1="' + X(a.x) + '" y1="' + Y(a.y) + '" x2="' + X(b.x) + '" y2="' + Y(b.y) + '" stroke="#9fb3c8" stroke-width="0.8"/>');
-    dims.forEach(d => { s += '<line x1="' + X(d.a.x) + '" y1="' + Y(d.a.y) + '" x2="' + X(d.b.x) + '" y2="' + Y(d.b.y) + '" stroke="#1E6FF4" stroke-width="1.2" marker-start="url(#rAr)" marker-end="url(#rAr)"/>' +
-      '<text x="' + (+X((d.a.x + d.b.x) / 2) + d.dx) + '" y="' + (+Y((d.a.y + d.b.y) / 2) + d.dy) + '" text-anchor="' + d.anchor + '" font-size="18" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:4px">' + esc(d.txt) + '</text>'; });
-    return s + '</svg>';
-  }
   // 2D изгледи (мм): отпред — праговете и разстоянията; отстрани — трапецът
   function rackViews(p){
     const g = rackGeo(p);

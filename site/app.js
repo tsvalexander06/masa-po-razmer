@@ -32,6 +32,7 @@
     <h3>Чертеж (3D изглед)</h3>
     <svg class="bp draw" viewBox="0 0 560 420" xmlns="http://www.w3.org/2000/svg"></svg>
 
+    <div class="f-tableFields">
     <h3>Размери и опции</h3>
     <div class="row">
       <div>
@@ -173,6 +174,13 @@
       </div>
     </div>
     </div>
+    <div class="f-rackBox" hidden>
+      <h3>Стойка за тави</h3>
+      <p class="info f-rackInfo"></p>
+      <label>Брой</label>
+      <input type="number" class="f-rackQty" value="1" min="1" max="50" step="1">
+    </div>
+    </div>
   `;
 
   /* ---------- шаблони: често поръчвани маси (размерите са само начални — клиентът ги сменя) ---------- */
@@ -184,17 +192,27 @@
     { id:"two",     name:"Маса с два долни плота",     desc:"Долен и междинен плот — повече място",          v:{ L:1200, D:600, midOn:true }, hide:["legs6", "gn"] },
     { id:"standgn", name:"Стойка за конвектомат с GN", desc:"Ниска, със стелаж за тави GN 1/1 отдолу",       v:{ L:900, D:700, H:700, gn:true } },
     { id:"gn",      name:"Тясна маса със стелаж GN",   desc:"Тавите GN 1/1 влизат между двата крака",        v:{ L:420, D:650, baseOn:false, gn:true } },
+    { id:"rack",    name:"Стойка за тави за миялна",   desc:"Тавите на миялната машина стоят на ръб между праговете", rack:true, v:{} },
     { id:"six",     name:"Маса с 6 крака",             desc:"Дълга маса, долен плот в едната част",          v:{ L:2000, D:700, splashOn:true, legs6:true }, hide:["legs6", "gn"] },
   ];
   const TPL_BASE = { L:1200, D:600, H:850, splashOn:false, baseOn:true, midOn:false, legs6:false, gn:false, legBack:70, baseH:150 };
   // малка картинка на шаблона — само масата, без размери
   function tplPicture(svg, tp){
+    if(tp.rack){ rackInto(svg, RACK_STD, { noDims:true }); return; }
     const v = Object.assign({ splashH:100, hemDir:"wall", hem:20, legProfile:30, notes:"", shelfSide:"left", bayL:0, rails:false, railH:0, noDims:true }, TPL_BASE, tp.v);
     v.mid2H = Math.round((v.baseH + Math.max(0, v.H - 40)) / 2);
     if(has6(v)) v.legs6 = true;
     drawBlueprint(v, svg, PRICE);
   }
+  // стойката за тави — в същото <svg> като чертежа на масата (свой viewBox)
+  function rackInto(el, p, opt){
+    const s = rackSvg(p, opt), vb = (s.match(/viewBox="([^"]+)"/) || [])[1];
+    if(vb) el.setAttribute("viewBox", vb); el.innerHTML = s.replace(/^<svg[^>]*>/, "").replace(/<\/svg>$/, "");
+  }
   function applyTemplate(t, tp){
+    t.kind = tp && tp.rack ? "rack" : "table";
+    if(t.kind === "rack"){ t.card.querySelector('.f-rackQty').value = 1; t.tpl = tp; t.picked = true; showTplState(t); renderAll();
+      t.card.querySelector('.tplChosen').scrollIntoView({ behavior:"smooth", block:"start" }); return; }
     const q = s => t.card.querySelector(s), v = Object.assign({}, TPL_BASE, tp ? tp.v : {});
     q('.f-L').value = v.L; q('.f-D').value = v.D; q('.f-H').value = v.H;
     q('.f-splashOn').checked = v.splashOn; q('.f-baseOn').checked = v.baseOn || v.midOn; q('.f-midOn').checked = v.midOn;
@@ -698,8 +716,22 @@
     $("afterTables").hidden = !tables.some(t => t.picked);              // без избрана маса — нищо отдолу
     $("addTable").style.display = tables.some(t => !t.picked) ? "none" : "";
     tables.forEach((t,i)=>{
-      t.card.querySelector('.num').textContent = "Маса "+(i+1);
+      const tn = tables.slice(0, i + 1).filter(x => x.kind !== "rack").length;   // номерът сред масите
+      t.card.querySelector('.num').textContent = t.kind === "rack" ? "Стойка за тави" : "Маса "+tn;
       t.card.querySelector('.rm').style.display = tables.length>1 ? "inline-flex" : "none";
+      { const rk = t.kind === "rack"; t.card.querySelector('.f-tableFields').hidden = rk; t.card.querySelector('.f-rackBox').hidden = !rk; }
+      if(t.kind === "rack"){   // стойка за тави: стандартна, клиентът избира само броя
+        const qi = t.card.querySelector('.f-rackQty'), qty = Math.max(1, Math.min(50, Math.round(+qi.value || 1))), g = rackGeo(RACK_STD);
+        t.vals = { kind:"rack", qty };
+        rackInto(t.card.querySelector('.draw'), RACK_STD, { uid:"rkc" + i });
+        t.card.querySelector('.f-rackInfo').textContent = "Основа " + g.W + " × " + g.D + " мм от профил " + g.bw + "×" + g.bh + " със среден профил · " + g.n +
+          " прага от профил " + g.t + "×" + g.t + " (триъгълник, висок " + rf(g.H) + " мм) · тавите стоят на ръб между праговете — светло " + rf(g.gap) + " мм · от неръждаема стомана, заварена.";
+        t.specText = "🔧 СТОЙКА ЗА ТАВИ ЗА МИЯЛНА МАШИНА\n──────────────\nОснова:     " + g.W + " × " + g.D + " мм, профил " + g.bw + "×" + g.bh + " (със среден профил)\n" +
+          "Прагове:    " + g.n + " бр., профил " + g.t + "×" + g.t + ", триъгълник " + rf(g.H) + " мм\nСветло между праговете: " + rf(g.gap) + " мм\nБрой:       " + qty + "\n";
+        t.problems = []; t.card.querySelector('.f-errors').hidden = true;
+        return;
+      }
+      t.card.querySelector('.draw').setAttribute("viewBox", "0 0 560 420");
       const v = readTable(t);
       t.vals = v;
       t.card.querySelector('.f-splashBox').style.display = v.splashOn?"block":"none";
@@ -753,7 +785,7 @@
       t.card.querySelector('.f-midBox').style.display = v.midOn?"block":"none";
       t.card.querySelector('.f-mid2info').textContent = v.midOn ? "(≈ "+v.mid2H+" мм от пода)" : "";
       drawBlueprint(v, t.card.querySelector('.draw'), PRICE);
-      t.specText = tableSpec(v, i+1);
+      t.specText = tableSpec(v, tn);
       t.problems = t.picked ? tableProblems(v) : ["Не е избран вид маса — изберете от картинките или „Започни от нулата“."];
       { const box = t.card.querySelector('.f-errors'); box.hidden = !t.problems.length;
         box.innerHTML = t.problems.length ? '<b>Тази маса не може да се направи така:</b><ul>' + t.problems.map(x => '<li>' + esc(x) + '</li>').join("") + '</ul>' : ""; }
@@ -762,7 +794,8 @@
     let s="";
     tables.forEach(t=>{ s += t.specText + "\n"; });
     s += "══════════════\n";
-    s += "Брой маси: "+tables.length+"\n";
+    { const nt = tables.filter(t => t.kind !== "rack").length, nr = tables.filter(t => t.kind === "rack").reduce((a, t) => a + t.vals.qty, 0);
+      if(nt) s += "Брой маси: "+nt+"\n"; if(nr) s += "Стойки за тави: "+nr+"\n"; }
     const nm=$("name").value.trim(), ph=$("phone").value.trim();
     if(nm) s+="Име:     "+nm+"\n";
     if(ph) s+="Телефон: "+ph+"\n";
@@ -876,7 +909,7 @@
     else { x.fillStyle="#1552c7"; x.font="bold 46px Arial,sans-serif"; x.fillText("KONVEKTOMAT.STORE",70,96); }
     if(label){ x.textAlign="right"; x.fillStyle="#64748b"; x.font="22px Arial,sans-serif"; x.fillText(label, W-70, 104); x.textAlign="left"; }
     x.fillStyle="#64748b"; x.font="26px Arial,sans-serif";
-    x.fillText("Маса по поръчка — инокс",70,150);
+    x.fillText(t.kind === "rack" ? "Стойка за тави за миялна машина — инокс" : "Маса по поръчка — инокс",70,150);
     const dyimg=180;
     x.strokeStyle="#d5dde7"; x.strokeRect(70,dyimg,dw,dh);
     x.drawImage(drawImg,70,dyimg,dw,dh);
@@ -900,7 +933,7 @@
   async function allCanvases(meta){
     const out=[];
     for(let i=0;i<tables.length;i++){
-      const label = tables.length>1 ? ("Маса "+(i+1)+" от "+tables.length) : "";
+      const label = tables.length>1 ? ("Лист "+(i+1)+" от "+tables.length) : "";
       out.push(await tableCanvas(tables[i], label, meta));
     }
     return out;
@@ -999,8 +1032,9 @@
 
   /* ---------- order data ---------- */
   function orderNumber(){ if(!ORDER_NO) ORDER_NO=genOrderNo(); return ORDER_NO; }
+  function racksSnapshot(){ return tables.filter(t => t.kind === "rack").map(t => Object.assign({}, RACK_STD, { qty:t.vals.qty })); }
   function tablesSnapshot(){
-    return tables.map(t=>{
+    return tables.filter(t => t.kind !== "rack").map(t=>{
       const v=t.vals;
       return { L:v.L, D:v.D, H:v.H, thickness:1.5, legProfile:v.legProfile,
         splashOn:v.splashOn, splashH:v.splashH, hemDir:v.hemDir, hem:v.hem, legBack:v.legBack, splashBack:v.splashBack, sink:v.sink||"", sinkExt:v.sinkExt||0, sinkExtSide:v.sinkExtSide||"right",
@@ -1016,6 +1050,7 @@
   function buildOrder(){
     const pc=promoOf($("promo").value);
     const o={ v:1, orderNo:orderNumber(), name:$("name").value.trim(), phone:$("phone").value.trim(), delivery:readDelivery(), tables:tablesSnapshot() };
+    { const rk = racksSnapshot(); if(rk.length) o.racks = rk; }
     if(pc) o.promo=pc.code;
     o.price=priceFor(o);
     return o;
@@ -1046,6 +1081,7 @@
     sinkTop: 450,       // € — мивка: готов горен модул (купува се; в цената за клиента — без надценка)
     sinkL: 1200, sinkD: 700, sinkSplash: 100,   // мм — модулът на мивката (с борд)
     sinkBowl: [450, 610, 290], sinkBowlEdge: 100,   // коритото: по дължината × отпред назад × дълбочина; от края на модула
+    rack10M: 24/6, rack2010M: 32/6,   // € за метър профил 10×10 и 20×10 (прът 6 м = 24 € / 32 €) — стойката за тави
     markupPct: 120,     // надценка % върху целия труд и материалите (клиентска цена = себестойност × 2.2)
     topEdge:30, topReturn:12, shelfEdge:20, shelfReturn:12, topCut:8, shelfCut:16, stretch:2, splashHem:20, legInset:30, shelfGap:15, shelfGapW:25, thickness:1.5, frameGap:2
   };
@@ -1125,10 +1161,12 @@
     return { mat, tube, weld, bend, caps, buy, base:mat+tube, labour:weld+bend };   // base (материали) — с надценка; трудът — без
   }
   function priceFor(order){
-    if(!order||!order.tables||!order.tables.length) return null;
+    if(!order||!((order.tables||[]).length||(order.racks||[]).length)) return null;
     const m=1+PRICE.markupPct/100; let total=0; const lines=[];
-    order.tables.forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour + pp.buy;   // заварките и готовата мивка — без надценка
+    (order.tables||[]).forEach((t,i)=>{ const q=t.qty||1, pp=priceParts(t), per=(pp.base+pp.caps)*m + pp.labour + pp.buy;   // заварките и готовата мивка — без надценка
       total+=per*q; lines.push({label:"Маса "+(i+1)+(q>1?" × "+q:""), amount:per*q}); });
+    (order.racks||[]).forEach(r=>{ const q=Math.max(1,Math.round(+r.qty||1)), rp=rackParts(r), per=rp.base*m + rp.labour;   // стойка за тави
+      total+=per*q; lines.push({label:"Стойка за тави"+(q>1?" × "+q:""), amount:per*q}); });
     const pc=promoOf(order.promo);
     if(pc){ const d=total*pc.pct/100; lines.push({label:"Отстъпка "+pc.pct+"% (промокод "+pc.code+")", amount:-d}); total-=d;
       return { total, currency:"€", lines, promo:pc.code, discountPct:pc.pct, discount:d }; }
@@ -1137,6 +1175,117 @@
   // промокодове (без значение главни/малки букви) → отстъпка % върху цялата поръчка
   const PROMOS = { INOX15:15 };
   function promoOf(code){ const c=String(code||"").trim().toUpperCase(); return PROMOS[c] ? { code:c, pct:PROMOS[c] } : null; }
+  /* ===== СТОЙКА ЗА ТАВИ ЗА МИЯЛНА — ДРЪЖ ИДЕНТИЧНО в app.js и admin/admin.js =====
+     Основа — рамка от профил 20×10 (легнал) със среден напречен профил; прагове от профил 10×10 (триъгълник 45° —
+     всички срезове по 45°; или квадрат „П“ / трапец). Цена = профилите (€/м) × (1 + надценка%) + заварките (без надценка):
+     шев = половин обиколка на профила (както 30×30 = 6 см) → 20×10: 3 см, 10×10: 2 см. */
+  const RACK_STD = { shape:"tri", W:500, D:500, H:200, ang:45, top:300, n:6, bw:20, bh:10, t:10 };
+  const rf = n => String(Math.round(n * 10) / 10);
+  function rackGeo(p){
+    let H = Math.max(20, +p.H || 0);
+    const W = Math.max(100, +p.W || 0), D = Math.max(100, +p.D || 0), t = Math.max(4, +p.t || 0), bw = Math.max(5, +p.bw || 0), bh = Math.max(5, +p.bh || 0);
+    const n = Math.max(2, Math.round(+p.n || 2)), shape = ["rect", "trap", "tri"].includes(p.shape) ? p.shape : "tri";
+    if(shape === "tri"){ const ta = Math.min(75, Math.max(15, +p.ang || 45)); H = Math.round(D / 2 * Math.tan(ta * Math.PI / 180) * 10) / 10; }   // триъгълник: височината — от наклона
+    const top = shape === "trap" ? Math.min(D - 2 * t, Math.max(0, +p.top || 0)) : 0, a = shape === "trap" ? (D - top) / 2 : shape === "tri" ? D / 2 : 0;   // a — хоризонталното отместване на наклона
+    const ang = a > 0 ? Math.atan2(H, a) * 180 / Math.PI : 90;                            // наклон спрямо основата
+    const pitch = (W - t) / (n - 1), xs = Array.from({ length:n }, (_, i) => i * pitch);  // крайните прагове — на ръба на рамката
+    const len = (u, v) => Math.hypot(v[0] - u[0], v[1] - u[1]), mm = v => Math.round(v);   // дължините — на цял мм
+    // парчетата на един праг: многоъгълници в (дълбочина, височина над рамката)
+    let pieces, joints, hz;
+    if(shape === "rect"){ const hp = H - t;
+      pieces = [{ name:"Праг — стойка", per:2, polys:[[[0, 0], [t, 0], [t, hp], [0, hp]], [[D - t, 0], [D, 0], [D, hp], [D - t, hp]]], out:mm(hp), inn:mm(hp),
+                  note:"По 2 на праг. Двата края — прав срез 90°. Стои отвесно на ръба на рамката (отпред и отзад); горната част ляга върху стойките." },
+                { name:"Праг — горна част", per:1, polys:[[[0, hp], [D, hp], [D, H], [0, H]]], out:mm(D), inn:mm(D),
+                  note:"По 1 на праг. Двата края — прав срез 90°. Ляга върху двете стойки (челно)." }];
+      joints = 2; hz = D - t / 2;
+    } else {
+      const o = shape === "tri" ? [[0, 0], [a, H], [D, 0]] : [[0, 0], [a, H], [D - a, H], [D, 0]], c = rackContour(o, t);
+      const seg = k => [o[k], o[k + 1], c.i[k + 1], c.i[k]], foot = 90 - ang, mit = shape === "tri" ? ang : ang / 2;   // срезовете — от правия (90°)
+      const same = Math.abs(foot - mit) < 0.05;   // напр. 45° — и двата среза еднакви (едно нагласяне на циркуляра)
+      const leg = { name:"Праг — наклонена част (крак)", per:2, polys:[seg(0), seg(o.length - 2)], out:mm(len(o[0], o[1])), inn:mm(len(c.i[0], c.i[1])),
+        note:"По 2 на праг. " + (same && shape === "tri" ? "Двата края — срез " + rf(foot) + "° (едно нагласяне на циркуляра за всички парчета). " : "") +
+             "Размер: външна / вътрешна страна. Долу — срез " + rf(foot) + "° от правия (стъпва равно на рамката, наклон " + rf(ang) + "°); горе — " +
+             (shape === "tri" ? "срез " + rf(mit) + "° от правия (двата крака се срещат отгоре, отвесно)" : "фаска " + rf(mit) + "° от правия към горната част") + ". Парчето е трапец — външната страна е по-дългата и в двата края." };
+      pieces = [leg];
+      if(shape === "trap") pieces.push({ name:"Праг — горна част", per:1, polys:[seg(1)], out:mm(len(o[1], o[2])), inn:mm(len(c.i[1], c.i[2])),
+        note:"По 1 на праг. Размер: горна (външна) / долна (вътрешна) страна. Двата края — фаска " + rf(mit) + "° от правия." });
+      joints = shape === "tri" ? 1 : 2; hz = shape === "tri" ? D / 2 : D - a;
+    }
+    return { W, D, H, t, bw, bh, n, shape, top, a, ang, pitch, gap:pitch - t, xs, sideLen:Math.max(0, D - 2 * bw), midLen:Math.max(0, W - 2 * bw), pieces, joints, hz,
+             perPrag:pieces.reduce((s, q) => s + q.per * q.out, 0), nPieces:pieces.reduce((s, q) => s + q.per, 0) };
+  }
+  // външният контур на прага (от горния ръб на рамката) → вътрешният (профилът t е навътре); съединенията са по ъглополовящите
+  function rackContour(o, t){
+    const cx = o.reduce((s, q) => s + q[0], 0) / o.length, cy = o.reduce((s, q) => s + q[1], 0) / o.length;
+    const lines = o.slice(0, -1).map((_, k) => { const [x1, y1] = o[k], [x2, y2] = o[k + 1], l = Math.hypot(x2 - x1, y2 - y1); let nx = -(y2 - y1) / l, ny = (x2 - x1) / l;
+      if(nx * (cx - (x1 + x2) / 2) + ny * (cy - (y1 + y2) / 2) < 0){ nx = -nx; ny = -ny; } return { p:[x1 + nx * t, y1 + ny * t], d:[(x2 - x1) / l, (y2 - y1) / l] }; });
+    const cross = (A, B) => { const det = A.d[0] * B.d[1] - A.d[1] * B.d[0]; if(Math.abs(det) < 1e-9) return A.p;
+      const u = ((B.p[0] - A.p[0]) * B.d[1] - (B.p[1] - A.p[1]) * B.d[0]) / det; return [A.p[0] + A.d[0] * u, A.p[1] + A.d[1] * u]; };
+    const base = { p:[0, o[0][1]], d:[1, 0] };
+    return { o, i:[cross(lines[0], base)].concat(lines.slice(1).map((L, k) => cross(lines[k], L)), [cross(lines[lines.length - 1], base)]) };
+  }
+  // 3D (изометрия) — същият стил като чертежите на масите
+  function rackSvg(p, opt){
+    opt = opt || {}; const uid = opt.uid || ("rk" + (rackSvg.n = (rackSvg.n || 0) + 1));   // свои id за всеки чертеж (иначе скритите картинки го правят прозрачен)
+    // гледа се почти отстрани на праговете (ширината — скъсена, надолу; дълбочината — почти хоризонтално): при изометрия
+    // наклон 45° на праговете ляга точно по оста на чертежа и краката им се сливат в една линия
+    const AX = [0.35, 0.6], AZ = [0.97, 0.25];
+    const g = rackGeo(p), P = (x, y, z) => ({ x:x * AX[0] - z * AZ[0], y:x * AX[1] + z * AZ[1] - y }), quads = [], dims = [];
+    const V = [1, AX[1] + AX[0] * AZ[1] / AZ[0], AX[0] / AZ[0]];
+    let layer = 0;   // посоката към зрителя (там проекцията се слива в точка)
+    const face = (pts, nrm, fill) => { if(nrm[0] * V[0] + nrm[1] * V[1] + nrm[2] * V[2] <= 0) return;
+      const c = pts.reduce((s, q) => [s[0] + q[0] / pts.length, s[1] + q[1] / pts.length, s[2] + q[2] / pts.length], [0, 0, 0]);
+      quads.push({ layer, d:c[0] * V[0] + c[1] * V[1] + c[2] * V[2], pts:pts.map(q => P(q[0], q[1], q[2])), fill }); };
+    const TOP = "url(#" + uid + "rT)", FR = "url(#" + uid + "rF)", RI = "url(#" + uid + "rR)";
+    const box = (x, y, z, w, h, d) => { const X = x + w, Y = y + h, Z = z + d;
+      face([[x,Y,z],[X,Y,z],[X,Y,Z],[x,Y,Z]], [0,1,0], TOP); face([[x,y,Z],[X,y,Z],[X,Y,Z],[x,Y,Z]], [0,0,1], FR); face([[X,y,z],[X,Y,z],[X,Y,Z],[X,y,Z]], [1,0,0], RI);
+      face([[x,y,z],[x,Y,z],[x,Y,Z],[x,y,Z]], [-1,0,0], RI); face([[x,y,z],[X,y,z],[X,Y,z],[x,Y,z]], [0,0,-1], FR); };
+    // рамката: отпред и отзад по цялата ширина, отстрани — между тях
+    box(0, 0, g.D - g.bw, g.W, g.bh, g.bw); box(0, 0, 0, g.W, g.bh, g.bw);
+    box(0, 0, g.bw, g.bw, g.bh, g.sideLen); box(g.W - g.bw, 0, g.bw, g.bw, g.bh, g.sideLen);
+    box(g.bw, 0, g.D / 2 - g.bw / 2, g.midLen, g.bh, g.bw);   // среден профил — напречно, за здравина
+    // праговете: трапец (отпред нагоре, отгоре, отзад надолу); профилът t×t е навътре от външния контур
+    const y0 = g.bh;   // всяко парче — призма: многоъгълникът (дълбочина, височина) × дебелината t
+    const prism = (x0, x1, poly) => { const cz = poly.reduce((a, q) => a + q[0], 0) / poly.length, cy = poly.reduce((a, q) => a + q[1], 0) / poly.length, P3 = (x, q) => [x, y0 + q[1], q[0]];
+      face(poly.map(q => P3(x1, q)), [1, 0, 0], RI); face(poly.map(q => P3(x0, q)), [-1, 0, 0], RI);
+      poly.forEach((q, k) => { const r = poly[(k + 1) % poly.length], L = Math.hypot(r[0] - q[0], r[1] - q[1]) || 1; let nz = (r[1] - q[1]) / L, ny = -(r[0] - q[0]) / L;
+        if(nz * ((q[0] + r[0]) / 2 - cz) + ny * ((q[1] + r[1]) / 2 - cy) < 0){ nz = -nz; ny = -ny; }
+        face([P3(x0, q), P3(x1, q), P3(x1, r), P3(x0, r)], [0, ny, nz], ny > 0.7 ? TOP : nz > 0 ? FR : RI); }); };
+    layer = 1;   // праговете — над основата (основата е отдолу и не ги закрива, затова се рисува първа)
+    g.xs.forEach(x0 => g.pieces.forEach(pc => pc.polys.forEach(poly => prism(x0, x0 + g.t, poly))));
+    quads.sort((a, b) => a.layer - b.layer || a.d - b.d);
+    // размери
+    const off = Math.max(g.W, g.D) * 0.16;
+    const dim = (a, b, txt, dx, dy, anchor) => dims.push({ a:P(...a), b:P(...b), txt, dx, dy, anchor });
+    dim([0, 0, g.D + off], [g.W, 0, g.D + off], String(g.W), 0, 18, "middle");
+    dim([g.W + off, 0, 0], [g.W + off, 0, g.D], String(g.D), 8, 4, "start");
+    dim([g.W + off * 0.6, y0, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz], rf(g.H), 8, 0, "start");
+    const ext = [[[0, 0, g.D], [0, 0, g.D + off]], [[g.W, 0, g.D], [g.W, 0, g.D + off]], [[g.W, 0, 0], [g.W + off, 0, 0]], [[g.W, 0, g.D], [g.W + off, 0, g.D]],
+                 [[g.W, y0 + g.H, g.hz], [g.W + off * 0.6, y0 + g.H, g.hz]], [[g.W, y0, g.hz], [g.W + off * 0.6, y0, g.hz]]].map(e => e.map(q => P(...q)));
+    if(opt.noDims){ dims.length = 0; ext.length = 0; }
+    let mi = [1e9, 1e9], ma = [-1e9, -1e9];
+    quads.forEach(q => q.pts.forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    dims.forEach(d => [d.a, d.b].forEach(v => { mi = [Math.min(mi[0], v.x), Math.min(mi[1], v.y)]; ma = [Math.max(ma[0], v.x), Math.max(ma[1], v.y)]; }));
+    const VW = 900, VH = 620, pad = 60, sc = Math.min((VW - 2 * pad) / (ma[0] - mi[0]), (VH - 2 * pad) / (ma[1] - mi[1]));
+    const ox = (VW - (ma[0] - mi[0]) * sc) / 2, oy = (VH - (ma[1] - mi[1]) * sc) / 2, X = v => (ox + (v - mi[0]) * sc).toFixed(1), Y = v => (oy + (v - mi[1]) * sc).toFixed(1);
+    const grad = (id, a, b) => '<linearGradient id="' + id + '" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + a + '"/><stop offset="1" stop-color="' + b + '"/></linearGradient>';
+    let s = '<svg viewBox="0 0 ' + VW + ' ' + VH + '" xmlns="http://www.w3.org/2000/svg" font-family="-apple-system,Segoe UI,Roboto,Arial,sans-serif"><defs>' +
+      '<marker id="' + uid + 'rAr" markerWidth="9" markerHeight="9" refX="4.5" refY="4.5" orient="auto"><path d="M1 1L8 4.5L1 8" fill="none" stroke="#1E6FF4" stroke-width="1.4"/></marker>' +
+      grad(uid + "rT", "#f3f8fc", "#dae6f0") + grad(uid + "rF", "#d2dde9", "#b1c3d6") + grad(uid + "rR", "#b7c7d9", "#94a9be") + '</defs>';
+    s += '<polygon points="' + [P(-20, 0, -20), P(g.W + 20, 0, -20), P(g.W + 20, 0, g.D + 20), P(-20, 0, g.D + 20)].map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="#334155" opacity="0.07"/>';
+    quads.forEach(q => s += '<polygon points="' + q.pts.map(v => X(v.x) + ',' + Y(v.y)).join(' ') + '" fill="' + q.fill + '" stroke="#5f7d9e" stroke-width="0.8" stroke-linejoin="round"/>');
+    ext.forEach(([a, b]) => s += '<line x1="' + X(a.x) + '" y1="' + Y(a.y) + '" x2="' + X(b.x) + '" y2="' + Y(b.y) + '" stroke="#9fb3c8" stroke-width="0.8"/>');
+    dims.forEach(d => { s += '<line x1="' + X(d.a.x) + '" y1="' + Y(d.a.y) + '" x2="' + X(d.b.x) + '" y2="' + Y(d.b.y) + '" stroke="#1E6FF4" stroke-width="1.2" marker-start="url(#' + uid + 'rAr)" marker-end="url(#' + uid + 'rAr)"/>' +
+      '<text x="' + (+X((d.a.x + d.b.x) / 2) + d.dx) + '" y="' + (+Y((d.a.y + d.b.y) / 2) + d.dy) + '" text-anchor="' + d.anchor + '" font-size="18" font-weight="700" fill="#1552c7" style="paint-order:stroke;stroke:#fff;stroke-width:4px">' + esc(d.txt) + '</text>'; });
+    return s + '</svg>';
+  }
+  function rackParts(r){
+    const g = rackGeo(Object.assign({}, RACK_STD, r || {}));
+    const m20 = (2 * g.W + 2 * g.sideLen + g.midLen) / 1000, m10 = g.n * g.perPrag / 1000;   // метри профил
+    const cm = 6 * (g.bw + g.bh) / 10 + g.n * (g.joints + 2) * (2 * g.t) / 10;               // 4 ъгъла + 2 на средния; на праг — съединенията + 2 крака
+    const mat = m20 * PRICE.rack2010M + m10 * PRICE.rack10M, weld = cm * PRICE.weldPerCm;
+    return { g, m20, m10, cm, mat, weld, base:mat, labour:weld };
+  }
 
   /* Tamper-evidence signature over the order (HMAC-SHA256).
      ВАЖНО: ключът е в кода на страницата, затова това доказва промяна, но не е
