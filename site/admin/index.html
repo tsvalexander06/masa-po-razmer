@@ -241,6 +241,13 @@
     .sheets{grid-template-columns:1fr}
     .sheet svg{max-width:620px}
     .sheet .cap,.scheme figcaption{font-size:14px}
+    /* схемите и листовете не се режат между страниците: в мрежа (grid) браузърите — и Safari на iPhone —
+       не спазват „не разделяй“, затова при печат са обикновени блокове, всеки цял (и по-нисък от страницата) */
+    .schemes,.sheets{display:block!important}
+    .schemes .scheme,.sheets .sheet{display:block;break-inside:avoid;page-break-inside:avoid;margin:0 0 12px}
+    .schemes .scheme svg,.sheets .sheet svg{max-height:225mm;width:auto!important;max-width:100%!important;margin:0 auto}
+    .card h3 + .schemes,.card h3 + .tw{break-before:avoid;page-break-before:avoid}
+    .card h2,.card h3{page-break-after:avoid}
   }
 </style>
 </head>
