@@ -167,6 +167,9 @@
     .tcut ~ .tcut{break-before:page}                         /* разкроят на всяка маса — на своя страница */
     .card .tw{break-inside:avoid}                            /* таблиците за рязане не се разделят */
     .drawgrid svg{max-height:98mm} .dfront svg{max-height:108mm}
+    /* първата маса е на първата страница след заглавната карта — чертежите ѝ са малко по-ниски, за да се събере (иначе страницата остава празна) */
+    .parthead + .tdraw .drawgrid svg{max-height:80mm} .parthead + .tdraw .dfront svg{max-height:80mm}
+    .parthead + .tdraw .rdy3d svg{max-height:85mm} .parthead + .tdraw .rdyviews svg{max-height:55mm}
     .tdraw .scheme figcaption{font-size:12px}
     .tdraw .printsum{font-size:13px}
     .rdy3d svg{max-height:115mm;width:auto!important;max-width:100%;margin:0 auto} .rdyviews,.rdycard .tw{break-inside:avoid} .rdyviews svg{max-height:70mm}
